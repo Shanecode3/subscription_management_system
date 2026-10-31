@@ -443,3 +443,50 @@ export interface FinanceFilterOptions {
   plans: FinancePlanOption[];
   customers: FinanceCustomerOption[];
 }
+
+// ---------------------------------------------------------------------------
+// Workspace summary cards on the dashboard (one call, many aggregates)
+// ---------------------------------------------------------------------------
+
+export interface DashboardStatusCount {
+  status: string;
+  count: number;
+}
+
+export interface DashboardInvoiceStatus extends DashboardStatusCount {
+  amount: number;
+}
+
+export interface DashboardProductType {
+  type: string;
+  count: number;
+  active: number;
+}
+
+export interface DashboardBillingDue {
+  subscriptionNumber: string;
+  customerName: string;
+  nextBillingDate: string;
+  totalAmount: number;
+}
+
+export interface DashboardSummary {
+  invoices: { total: number; byStatus: DashboardInvoiceStatus[] };
+  subscriptions: { total: number; byStatus: DashboardStatusCount[] };
+  catalogue: {
+    products: { total: number; active: number; byType: DashboardProductType[] };
+    plans: { total: number; active: number };
+    templates: { total: number };
+  };
+  discounts: { total: number; active: number; usesRemaining: number };
+  taxRules: { total: number; active: number; defaultRate: number };
+  billing: {
+    dueCount: number;
+    dueTotal: number;
+    closingCount: number;
+    due: DashboardBillingDue[];
+  };
+  /** Server-side milliseconds spent on the aggregate queries. */
+  queryTimeMs: number;
+  generatedAt: string;
+}

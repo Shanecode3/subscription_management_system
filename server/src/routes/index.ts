@@ -15,6 +15,7 @@ import { invoiceRouter } from './invoice.routes';
 import { paymentRouter } from './payment.routes';
 import { financeRouter } from './finance.routes';
 import { billingRouter } from './billing.routes';
+import { dashboardRouter } from './dashboard.routes';
 
 export const apiRouter = Router();
 
@@ -55,4 +56,5 @@ apiRouter.use('/invoices', invoiceRouter);
 apiRouter.use('/payments', paymentRouter);
 apiRouter.use('/finance', financeRouter);
 apiRouter.use('/billing', billingRouter);
+apiRouter.use('/dashboard', dashboardRouter);
 apiRouter.use('/portal', portalRouter);

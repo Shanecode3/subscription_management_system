@@ -287,6 +287,9 @@
   - [x] Rebuild `/products` as one card per product with a type-coloured rail; cost price and margin are admin-only.
   - [x] Add a derived "What this plan includes" list to every `/plans` card (charge, annualised value, ordering window, self-service rights, close rule).
   - [x] Verify both screens with Playwright: zero console warnings or errors.
+  - [x] Replace the dashboard's three shortcut buttons with one summary card per section (MRR bars, invoice status bar, contract mix, catalogue, discount/tax coverage, next billing queue); each card is a link with a hover state.
+  - [x] Add `GET /api/v1/dashboard/summary` so every card is fed by one fixed-size aggregate call instead of client-side summing.
+  - [x] Give customers a live portal card (active contracts, next bill, per-contract status) instead of copy, via `/portal/subscriptions`.
 
 ---
 

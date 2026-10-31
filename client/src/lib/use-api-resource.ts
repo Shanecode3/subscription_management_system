@@ -14,8 +14,12 @@ interface Resource<T> {
  * Loads one API resource and keeps loading/error state in one place, so each
  * page does not re-implement the same effect. `reload` re-runs the request;
  * `setData` lets a page apply the object a mutation returned without refetching.
+ *
+ * A `null` path means "do not call this endpoint" — the dashboard passes null
+ * for the staff-only summaries when a customer is signed in, which keeps the
+ * request off the wire instead of letting it come back 403.
  */
-export function useApiResource<T>(path: string): Resource<T> {
+export function useApiResource<T>(path: string | null): Resource<T> {
   const { token } = useAuth();
   const [data, setData] = useState<T | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -26,6 +30,13 @@ export function useApiResource<T>(path: string): Resource<T> {
 
   useEffect(() => {
     let cancelled = false;
+
+    if (path === null) {
+      setData(null);
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
 
     if (!token) {
       setIsLoading(false);

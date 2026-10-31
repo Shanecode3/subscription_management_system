@@ -155,6 +155,7 @@ Base path: `/api/v1`
 | `POST` | `/billing/run-billing-day` | Admin, Staff — idempotent invoice generation |
 | `GET` | `/finance/dashboard` | Admin, Staff — KPI summary; filter by `startDate`, `endDate`, `planId`, `customerId`, `limit` |
 | `GET` | `/finance/filter-options` | Admin, Staff — plans and customers that actually have contracts |
+| `GET` | `/dashboard/summary` | Admin, Staff — one call for the dashboard cards: invoice/subscription status mixes, catalogue counts, live discounts and tax rules, and the next billing-day queue |
 
 Responses use one envelope everywhere:
 
