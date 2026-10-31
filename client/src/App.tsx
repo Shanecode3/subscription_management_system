@@ -1,7 +1,11 @@
 import { Route, Routes } from 'react-router-dom';
 import { ProtectedRoute, PublicOnlyRoute } from './components/layout/ProtectedRoute';
+import { RoleRoute } from './components/layout/RoleRoute';
 import { DashboardPage } from './pages/DashboardPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { PlansPage } from './pages/PlansPage';
+import { ProductsPage } from './pages/ProductsPage';
+import { TemplatesPage } from './pages/TemplatesPage';
 import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage';
 import { LoginPage } from './pages/auth/LoginPage';
 import { ResetPasswordPage } from './pages/auth/ResetPasswordPage';
@@ -48,6 +52,35 @@ export default function App() {
         element={
           <ProtectedRoute>
             <DashboardPage />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/products"
+        element={
+          <ProtectedRoute>
+            <ProductsPage />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/plans"
+        element={
+          <ProtectedRoute>
+            <PlansPage />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/templates"
+        element={
+          <ProtectedRoute>
+            <RoleRoute roles={['ADMIN', 'STAFF']}>
+              <TemplatesPage />
+            </RoleRoute>
           </ProtectedRoute>
         }
       />

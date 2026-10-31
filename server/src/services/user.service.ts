@@ -4,12 +4,9 @@ import { recordAuditEvent } from '../repositories/audit.repository';
 import * as userRepository from '../repositories/user.repository';
 import type { CreateStaffInput } from '../utils/validators';
 import { hashPassword, toPublicUser, type PublicUser } from './auth.service';
-import type { UserRole } from '../utils/jwt';
+import type { Requester } from './requester';
 
-export interface Requester {
-  id: number;
-  role: UserRole;
-}
+export type { Requester };
 
 export async function listAllUsers(): Promise<PublicUser[]> {
   const rows = await userRepository.listUsers();

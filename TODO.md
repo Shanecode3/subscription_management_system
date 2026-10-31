@@ -87,29 +87,29 @@
 - **AC2.3 (Template Line Pre-fill):** Given a quotation template with 2 product lines, When selected, Then pre-fill the quotation with those exact products, quantities, and prices.
 
 ### Task Checklist
-- [ ] **2.1 Products & Variants Module:**
-  - [ ] Implement `server/src/routes/product.routes.ts` & `product.service.ts` (CRUD for products: `Software`, `Service`, `Add-on`).
-  - [ ] Implement variant endpoints `POST /api/v1/products/:id/variants` (attribute name, value, price_extra).
-  - [ ] Seed default catalog items:
+- [x] **2.1 Products & Variants Module:**
+  - [x] Implement `server/src/routes/product.routes.ts` & `product.service.ts` (CRUD for products: `Software`, `Service`, `Add-on`).
+  - [x] Implement variant endpoints `POST /api/v1/products/:id/variants` (attribute name, value, price_extra).
+  - [x] Seed default catalog items:
     - *Brightloop Enterprise ERP* ($1,200/mo) with variant *Brand = "Odoo"* (+560).
     - *Cloud Infrastructure Add-on* ($150/mo).
     - *Priority Support 24/7* ($300/mo).
-- [ ] **2.2 Subscription Plans Module:**
-  - [ ] Implement `server/src/routes/plan.routes.ts` & `plan.service.ts`.
-  - [ ] Validate billing intervals (`daily`, `weekly`, `monthly`, `yearly`) and date availability.
-  - [ ] Persist lifecycle flags: `auto_close`, `allow_early_close`, `allow_pause`, `allow_renew`.
-  - [ ] Seed default plans (Monthly Pro, Annual Enterprise with auto_close, Flexible Daily Trial).
-- [ ] **2.3 Quotation Templates Module:**
-  - [ ] Implement `server/src/routes/template.routes.ts` & `template.service.ts`.
-  - [ ] Support template header (`validity_days`, `plan_id`) and itemized template lines.
-- [ ] **2.4 Frontend Catalog & Plans Management:**
-  - [ ] Build `ProductsView.tsx` with variant modal and Odoo +560 price tag preview.
-  - [ ] Build `PlansView.tsx` displaying plan cards, billing frequencies, and toggle badges for plan flags.
-  - [ ] Build `TemplatesView.tsx` showing pre-configured offer packages.
-- [ ] **2.5 Verification & Commit:**
-  - [ ] Verify API endpoints for products, variants, and plans.
-  - [ ] Update `DEFENSE_LOG.md` (Milestone 2 entries).
-  - [ ] Git commit and push to `origin main`.
+- [x] **2.2 Subscription Plans Module:**
+  - [x] Implement `server/src/routes/plan.routes.ts` & `plan.service.ts`.
+  - [x] Validate billing intervals (`daily`, `weekly`, `monthly`, `yearly`) and date availability.
+  - [x] Persist lifecycle flags: `auto_close`, `allow_early_close`, `allow_pause`, `allow_renew`.
+  - [x] Seed default plans (Monthly Pro, Annual Enterprise with auto_close, Flexible Daily Trial).
+- [x] **2.3 Quotation Templates Module:**
+  - [x] Implement `server/src/routes/template.routes.ts` & `template.service.ts`.
+  - [x] Support template header (`validity_days`, `plan_id`) and itemized template lines.
+- [x] **2.4 Frontend Catalog & Plans Management:**
+  - [x] Build `ProductsView.tsx` with variant modal and Odoo +560 price tag preview.
+  - [x] Build `PlansView.tsx` displaying plan cards, billing frequencies, and toggle badges for plan flags.
+  - [x] Build `TemplatesView.tsx` showing pre-configured offer packages.
+- [x] **2.5 Verification & Commit:**
+  - [x] Verify API endpoints for products, variants, and plans — 61/61 live assertions passed, including AC2.1, AC2.2 and AC2.3.
+  - [x] Update `DEFENSE_LOG.md` (Milestone 2 entries).
+  - [x] Git commit and push to `origin main`.
 
 ---
 

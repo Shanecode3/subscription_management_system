@@ -1,12 +1,14 @@
-import { LogOut } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { LogOut, Menu } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth-context';
+import { titleForPath } from '../../lib/navigation';
 import { BrandMark } from '../ui/BrandMark';
 import { RoleBadge } from '../ui/RoleBadge';
 
-export function Header() {
+export function Header({ onOpenMenu }: { onOpenMenu: () => void }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleLogout = () => {
     logout();
@@ -14,10 +16,25 @@ export function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-5 sm:px-8">
-        <div className="flex items-center gap-3">
-          <BrandMark size="sm" />
+    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+      <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-5 sm:px-8">
+        <div className="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={onOpenMenu}
+            aria-label="Open navigation"
+            className="-ml-1 rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-ink lg:hidden"
+          >
+            <Menu className="h-5 w-5" aria-hidden="true" />
+          </button>
+
+          <div className="lg:hidden">
+            <BrandMark size="sm" />
+          </div>
+
+          <p className="hidden truncate text-sm font-semibold text-slate-600 lg:block">
+            {titleForPath(location.pathname)}
+          </p>
         </div>
 
         {user ? (

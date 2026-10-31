@@ -555,8 +555,336 @@ Inputs receive `aria-invalid` and `aria-describedby` pointing at the error or hi
 
 Everything below is intentionally absent and belongs to a later milestone; nothing here is stubbed with static data.
 
-- Products, variants, plans and quotation templates — Milestone 2.
+- Products, variants, plans and quotation templates — delivered in Milestone 2 (sections 7–13).
 - Subscription state machine and customer portal — Milestone 3.
 - Tax/discount engines and the billing run — Milestone 4.
 - Payments and invoice reconciliation — Milestone 5.
 - Finance dashboard and performance seeding — Milestone 6.
+
+---
+
+## Milestone 2 — Catalog, Subscription Plans & Quotation Templates
+
+**Commit scope:** catalogue uniqueness and surcharge constraints, three catalog repositories, three services, three route modules, the extended seed, a DATE type parser, seven new UI primitives, a sidebar-based application shell, and the Products, Plans and Quotation templates screens.
+**Verified:** both workspaces compile (`tsc`), the client bundles (247 kB), the schema and seed apply twice in a row with identical row counts, and **61 of 61** live API assertions pass against a freshly created PostgreSQL 18 cluster — including AC2.1 (Brand = Odoo, +560 → $1,760), AC2.2 (lifecycle flags persist) and AC2.3 (a template reproduces its exact products, quantities and prices).
+
+### Repository additions
+
+```
+server/src/utils/catalog.validators.ts     zod schemas for products, variants, plans, templates
+server/src/utils/params.ts                 :id route-parameter parsing
+server/src/utils/money.ts                  NUMERIC text -> JSON number
+server/src/repositories/update-builder.ts  PATCH object -> SET clause via a column whitelist
+server/src/repositories/product.repository.ts
+server/src/repositories/plan.repository.ts
+server/src/repositories/template.repository.ts
+server/src/services/product.service.ts
+server/src/services/plan.service.ts
+server/src/services/template.service.ts
+server/src/services/requester.ts           shared { id, role } request identity
+server/src/routes/product.routes.ts
+server/src/routes/plan.routes.ts
+server/src/routes/template.routes.ts
+client/src/lib/                             format, navigation, plan-flags, use-api-resource
+client/src/components/ui/                   Modal, Switch, Badge, SelectField, TextAreaField,
+                                            PageHeader, EmptyState, IconButton
+client/src/components/layout/               Sidebar, RoleRoute
+client/src/components/catalog/              ProductFormModal, VariantFormModal,
+                                            PlanFormModal, TemplateFormModal
+client/src/pages/                           ProductsPage, PlansPage, TemplatesPage
+```
+
+---
+
+## 7. Database schema — Milestone 2 additions
+
+### 7.1 `uq_products_name`, `uq_plans_name`, `uq_templates_name`
+
+**How it works.** `products.name`, `subscription_plans.name` and `quotation_templates.name` now carry `UNIQUE` constraints. The API also performs a case-insensitive lookup (`WHERE LOWER(name) = LOWER($1)`) before inserting, so a duplicate is reported as a friendly 409 naming the clashing item rather than as a raw constraint violation.
+
+**Why this design.** Names are how staff and customers refer to these records — a second "Monthly Pro" is never what the user meant, and it would make every later dropdown ambiguous. The database constraint is the real guarantee (two simultaneous requests cannot both pass the application check); the case-insensitive query exists only so the message is useful, because `UNIQUE` itself is case-sensitive.
+
+**Q&A — Why keep the constraint if the service already checks for a duplicate?**
+Because the service check is a race-prone convenience, not a guarantee. The unique constraint is what makes the duplicate impossible, while the pre-check turns the most common failure into a specific message with the conflicting name.
+**Q&A — Is the name case-insensitive uniqueness enforced in the database?**
+Strictly speaking no — `UNIQUE (name)` treats `Monthly Pro` and `monthly pro` as different. The service rejects the case-insensitive duplicate and the audit trail records it; a functional unique index on `LOWER(name)` can be added later without a data change.
+
+### 7.2 `chk_variant_price_extra`
+
+**How it works.** `product_variants.price_extra` gains `CHECK (price_extra >= 0)`, so a variant can only raise a product's price, never silently discount it.
+
+**Why this design.** The brief defines a variant as a positive surcharge (Brand = Odoo, +560). A negative surcharge would be a discount rule in disguise, bypassing the Admin-only discount engine that Scene 5 makes the single place discounts are authored. The Zod schema rejects negatives too, so the user gets `Price extra cannot be negative.` while the database stands guard behind it.
+
+**Q&A — Why forbid a negative `price_extra` rather than reject it in the UI only?**
+Because a variant is by definition an uplift, and allowing a negative value would let anyone with the Admin screen create discounts outside the discount-rules module. The check keeps that single-source-of-truth intact at the storage layer.
+**Q&A — What does a variant cost when its surcharge is zero?**
+The line price is exactly the product's `sales_price`. The seeded `Brand: Brightloop` variant uses 0 so the ERP licence can be offered at its $1,200 base price.
+
+### 7.3 Guarded upgrade blocks for pre-existing databases
+
+**How it works.** Each new constraint is also added through a `DO $$ ... IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = ...) ... END $$;` block placed after the `CREATE TABLE IF NOT EXISTS`. On a fresh database the constraint already exists inside the table definition and the block is a no-op; on a Milestone 1 database the table is skipped by `IF NOT EXISTS`, so the block is what actually applies the constraint.
+
+**Why this design.** `CREATE TABLE IF NOT EXISTS` silently skips an existing table — including every constraint inside it. Without the guarded `ALTER`, a participant who ran the Milestone 1 schema would keep running against tables that never gained the new rules, and the failure would only appear later as a duplicate row nobody expected. The guard makes one schema file correct for both audiences.
+
+**Q&A — Why not drop and recreate the tables to apply new constraints?**
+Because the database now holds real seed and evaluation data. Dropping tables would destroy it, and making the schema script destructive would make `db:init` unsafe to re-run — the opposite of the idempotency every evaluator will test.
+**Q&A — How do you know the upgrade block actually ran?**
+`db:init` reports the table and index counts after applying the file (14 tables, 46 indexes), and the verification run applied the schema to a Milestone 1 database and then to a fresh one, with identical counts both times.
+
+---
+
+## 8. Database tooling
+
+### 8.1 `server/src/db/pool.ts` — the DATE type parser
+
+**How it works.** Alongside the `pg.Pool` singleton, the module registers `pg.types.setTypeParser(pg.types.builtins.DATE, (value) => value)`, so a `DATE` column arrives in JavaScript as the literal `'YYYY-MM-DD'` text PostgreSQL sent rather than as a `Date` at local midnight.
+
+**Why this design.** Node parses a `DATE` into a `Date` at midnight **local time**; serialising that to UTC moves the day backwards or forwards depending on the machine's offset. On an IST machine, `2026-01-01` would arrive as `2025-12-31T18:30:00Z` and the plan's availability window would be off by one day. Returning the raw text removes an entire class of timezone bugs from every plan and subscription date, and the UI formats it with a UTC-anchored helper.
+
+**Q&A — Why not just call `.toISOString().slice(0, 10)` on the value?**
+Because by then the shift has already happened: an IST machine has already turned `2026-01-01` into a `Date` for 2025-12-31 in UTC. The parser has to intervene before `pg` builds the `Date`.
+**Q&A — Does this affect `TIMESTAMPTZ` columns?**
+No. Timestamps are genuine instants and are still parsed to `Date` objects and returned as ISO strings; only `DATE` — a calendar day with no time — is handled as text.
+
+### 8.2 `server/src/db/seed.ts` — catalogue, plans and templates
+
+**How it works.** Three data tables drive the seed. `ensureProduct` selects by name and inserts only when missing, then inserts each variant with `ON CONFLICT (product_id, attribute_name, attribute_value) DO NOTHING`. `ensurePlan` inserts with `ON CONFLICT (name) DO NOTHING`. `ensureTemplate` returns early if the template exists, otherwise resolves each line's product and variant to an id, computes `sales_price + price_extra`, and inserts the header plus all lines inside one transaction. The run ends with a SQL count of users, products, variants, plans, templates and template lines.
+
+**Why this design.** A seed that re-runs must not duplicate or rewrite rows: the `SELECT`-then-`INSERT` in `ensureProduct` is deliberately not an upsert, because an upsert would bump `updated_at` on every run even when nothing changed. Template lines are seeded with the same `sales_price + price_extra` rule the API uses, so the seeded "Enterprise Monthly Starter" shows $1,760 for the Odoo ERP line — the acceptance criterion is visible in the seeded data, not only in a fresh request.
+
+**Q&A — Why is the seed not a single `TRUNCATE` followed by inserts?**
+Because the evaluator, and the participant, will run `db:setup` repeatedly. Truncating would wipe accounts and any invoices created during the demo. Every step is additive and idempotent instead.
+**Q&A — Why compute the template line price in the seed rather than hard-code 1760?**
+So the seeded data proves the pricing rule rather than restating its output. If a product price changed, the seed would follow it, exactly as a live quotation would.
+
+---
+
+## 9. Validation and small utilities
+
+### 9.1 `server/src/utils/catalog.validators.ts`
+
+**How it works.** Exports `PRODUCT_TYPES`, `BILLING_INTERVALS` and seven schemas (`createProductSchema`, `updateProductSchema`, `createVariantSchema`, `createPlanSchema`, `updatePlanSchema`, `createTemplateSchema`, plus inferred input types). Every schema is `.strict()`, so an unexpected key is an error rather than a silent drop. Shared field builders enforce business bounds: `moneyField` rejects negatives, values above the `NUMERIC(12,2)` ceiling, and more than two decimal places; `dateField` rejects both bad formats and impossible dates such as `2026-02-30`; `quantityField` requires a positive whole number; `updatePlanSchema` and `updateProductSchema` require at least one key. `createPlanSchema` cross-checks `availableTo >= availableFrom`.
+
+**Why this design.** Every message is written for the person filling the form — `Price extra cannot be negative.`, `Product type must be Software, Service or Add-on.` — because the rubric scores clear, specific errors. `.strict()` matters for role safety: a signup-style body that tries to smuggle `isActive` or an `id` is rejected instead of being quietly ignored. The money and date helpers are shared builders, so one rule change applies to every field that uses them.
+
+**Q&A — Why does `updateProductSchema` allow `isActive` when `createProductSchema` forbids it?**
+Because items are always created active; retiring and restoring are updates. Exposing it on create would invite a client to insert an already-invisible product, which no workflow needs.
+**Q&A — Where is the cross-field date check for a partial plan update?**
+In `plan.service.ts`, not in the Zod schema, because a PATCH may send only one of the two dates. The service merges the patch onto the stored row before comparing, which a request-level schema cannot do.
+
+### 9.2 `server/src/utils/params.ts`
+
+**How it works.** `parsePositiveIntParam(raw, label)` converts an Express `:id` string to an integer and throws a `ValidationError` with a `{ field: 'id' }` detail when the value is missing, empty, non-numeric or not positive.
+
+**Why this design.** Express hands path parameters over as text, and PostgreSQL would answer `GET /products/abc` with SQLSTATE `22P02` — a message about invalid input syntax for type integer. Failing before the query gives the client the same `VALIDATION_FAILED` envelope and field detail the rest of the API uses, and stops the invalid value reaching the database at all.
+
+**Q&A — Why is a non-numeric id a 400 rather than a 404?**
+Because the request itself is malformed — `/products/abc` cannot name any resource. The 404 is reserved for a well-formed id that does not exist, which the verification script also covers (`/products/999999`).
+**Q&A — Why return `field: 'id'` instead of the parameter's real name?**
+The UI groups errors by input name, and every route parameter is presented as an identifier; one consistent key keeps the client mapping simple.
+
+### 9.3 `server/src/utils/money.ts`
+
+**How it works.** `toAmount(value)` converts the text `pg` returns for `NUMERIC` into a JSON number rounded to two decimal places, returning 0 for `null`, `undefined` or a non-finite value.
+
+**Why this design.** `pg` returns `NUMERIC` as a string on purpose, to avoid IEEE-754 rounding of arbitrary precision. Our values are bounded by `NUMERIC(12,2)` — well inside the range where a double represents two-decimal amounts exactly — so returning a number is safe and gives the React layer `1200` instead of `"1200.00"`. It is applied once, at the service boundary, so no component has to remember the conversion.
+
+**Q&A — Why not configure `pg` to parse `NUMERIC` as a float globally?**
+That parser would also affect future aggregate columns, where a large sum should be handled deliberately rather than silently coerced. Keeping the conversion explicit at the DTO boundary leaves that decision in one visible place.
+**Q&A — Why does the function round instead of trusting the database?**
+Arithmetic such as base price plus variant surcharge happens in JavaScript before being returned. Rounding to paise at the boundary guarantees the response never carries `1759.9999999999998`.
+
+### 9.4 `server/src/repositories/update-builder.ts`
+
+**How it works.** `buildUpdateSet(changes, columns)` walks the keys of a patch object, skips `undefined`, maps the API field name to a physical column through a repository-declared whitelist, and returns `{ clause, values }` — for example `name = $1, price = $2`. An unmapped key throws, and an empty patch throws as well.
+
+**Why this design.** Three modules now need partial updates, and hand-building `SET` strings in each is how SQL injection and "updated a column nobody meant to update" bugs enter a codebase. The column name always comes from a constant map in the repository; the request supplies only values, which are parameterised. Skipping `undefined` is what lets one PATCH schema serve "change the price" and "flip one flag".
+
+**Q&A — How does this prevent SQL injection through a field name?**
+Field names are never interpolated from the request. `Object.keys(changes)` is matched against a fixed `Record` of known keys, and only the mapped, trusted column string reaches the SQL.
+**Q&A — What happens if a caller passes a key with no column mapping?**
+It throws immediately rather than ignoring it, so a typo in a service is caught in development instead of producing an update that silently did nothing.
+
+---
+
+## 10. Repositories — SQL only
+
+### 10.1 `server/src/repositories/product.repository.ts`
+
+**How it works.** Typed row interfaces (`ProductRow`, `VariantRow`) with `NUMERIC` fields declared as `string`; `listProducts(activeOnly)`, `findProductById`, `findProductByName` (case-insensitive), `insertProduct`, `updateProduct` (through `buildUpdateSet`), `listVariantsForProducts(ids)` using `product_id = ANY($1::int[])`, `findVariantById`, `findVariantByAttributes` and `deleteVariant`. Every function accepts an optional `PoolClient` so it can join a caller's transaction.
+
+**Why this design.** `listVariantsForProducts` is the reason the products page costs two queries rather than one per product: the service fetches all products, then all variants in a single round trip and groups them in memory. Accepting an optional client keeps the transaction boundary in the service — the repository never decides what belongs in a transaction, it just participates in one when asked.
+
+**Q&A — Why does `sales_price` appear as a string in the row type?**
+Because that is exactly what `pg` returns for `NUMERIC`, and declaring it honestly forces the service to convert it deliberately via `toAmount` instead of forgetting. The alternative — a cast that lies about the runtime type — hides the conversion.
+**Q&A — Could `listVariantsForProducts` become slow with a large catalogue?**
+No: it filters on `product_id = ANY(...)`, which uses `idx_variants_product`, and the id list is bounded by the page it serves. It also short-circuits to an empty array when given no ids, avoiding a pointless round trip.
+
+### 10.2 `server/src/repositories/plan.repository.ts`
+
+**How it works.** `listPlans(customersOnly)` orders by `is_active DESC, price ASC, name ASC`; when the flag is set it adds `is_active = TRUE AND available_from <= CURRENT_DATE AND (available_to IS NULL OR available_to >= CURRENT_DATE)`. Also `findPlanById`, `findPlanByName`, `insertPlan` and `updatePlan`. `available_from` / `available_to` are typed `string` / `string | null` because of the DATE parser.
+
+**Why this design.** The customer filter is a SQL predicate rather than a JavaScript filter so unavailable plans never leave the database, and so the `is_active` / interval index can do its job. `CURRENT_DATE` is evaluated by PostgreSQL in the server's timezone, which is the same clock the rest of the availability logic uses — doing it in Node would reintroduce the timezone question.
+
+**Q&A — Why does the customer query not simply filter in the service?**
+Because a filter in the service still transfers every plan, including retired ones, to the API process. Pushing it into the `WHERE` clause keeps the response small and makes the rule impossible to bypass by adding a new endpoint that forgets it.
+**Q&A — What does an admin see that a customer does not?**
+Retired plans, and plans whose availability window is in the future or has ended — the admin needs to see them to edit or restore them; the customer only sees what can be bought today.
+
+### 10.3 `server/src/repositories/template.repository.ts`
+
+**How it works.** Template queries join `subscription_plans` so `plan_name` and `plan_billing_interval` come back with the header; line queries join `products` and `LEFT JOIN product_variants` so each line carries `product_name`, `variant_attribute_name` and `variant_attribute_value`. `listLinesForTemplates(ids)` fetches every line for a page of templates in one `ANY(...)` query. `insertTemplateLines` writes all lines with a single multi-row `INSERT`.
+
+**Why this design.** A template screen shows a header with its plan and a table of lines with product names — resolving those in SQL means the client never has to join three collections itself. The `LEFT JOIN` is what makes an optional variant free rather than a second query per line. The multi-row insert keeps a 50-line template to one round trip inside the same transaction as its header.
+
+**Q&A — Why is the plan joined into the template query instead of fetched over HTTP by id?**
+Because the client renders a list of templates; a second request per template would be N+1 over the network. Joining is one indexed lookup and gives the UI everything it displays.
+**Q&A — How are the lines kept consistent if the header insert succeeds and the line insert fails?**
+Both run inside the service's `withTransaction`, so a failed line insert rolls the header back too. A template with zero lines is therefore never stored.
+
+---
+
+## 11. Services — business rules only
+
+### 11.1 `server/src/services/product.service.ts`
+
+**How it works.** Maps rows to DTOs (`toProductDto`, `toVariantDto`) where each variant reports both its `priceExtra` and its effective `price` (base + extra). `listProducts` shows a customer only active products; `getProduct` returns 404 for a retired product to a customer. `createProduct` / `updateProduct` / `deactivateProduct` / `addVariant` / `removeVariant` each assert `ADMIN`, reject case-insensitive duplicates with a 409, and write an audit event in the same transaction. `resolvePricedLine(productId, variantId)` validates that the product exists and is active and that the variant belongs to it, then returns `unitPrice = salesPrice + priceExtra`.
+
+**Why this design.** `resolvePricedLine` is the single implementation of the Odoo rule (AC2.1): a template line, and later a subscription line, cannot compute the price a different way. Retiring a product rather than deleting it is deliberate — once a product appears on an invoice, `ON DELETE RESTRICT` would refuse the delete anyway, and relaxing the key would rewrite history. The DTO carries `price` next to `priceExtra` so the UI never repeats the arithmetic in a second place.
+
+**Q&A — Why is the effective price computed on the server when the client could add the two numbers?**
+Because the price that gets billed must be decided where the data is written, not where it is displayed. The client reuses numbers the server already produced; the server is authoritative.
+**Q&A — Why does deleting a product not remove the row?**
+Historical invoices and subscriptions reference it under `RESTRICT`. Deactivating keeps every past document explainable while hiding the product from new work, and the same endpoint restores it.
+
+### 11.2 `server/src/services/plan.service.ts`
+
+**How it works.** `createPlan` asserts `ADMIN`, rejects duplicate names, then inserts with defaults `autoClose = false`, `allowEarlyClose = true`, `allowPause = true`, `allowRenew = true` and `minQuantity = 1`, and writes a `PLAN_CREATED` audit row. `updatePlan` merges the incoming partial patch with the stored row **before** re-checking the availability window, rebuilds an explicit patch and writes `PLAN_UPDATED`. `deactivatePlan` retires the plan. `listPlans` narrows to active-and-available plans for a customer.
+
+**Why this design.** The merged-window check is the subtle part: a PATCH that sends only `availableTo` must still be compared against the stored `availableFrom`, otherwise an impossible window could be created one field at a time. Defaults are stated in the service *and* in the schema so an API create and a direct SQL insert agree.
+
+**Q&A — Why can the flag toggles be a single-key PATCH?**
+Because each card control changes exactly one flag, and `updatePlanSchema` accepts any non-empty subset. Sending one key keeps the request honest about what changed and avoids overwriting fields another admin edited meanwhile.
+**Q&A — What does retiring a plan do to existing subscriptions?**
+Nothing — the subscription keeps its plan reference and its terms. Retirement only stops the plan being offered for new quotations, which is why the endpoint is a status change rather than a delete.
+
+### 11.3 `server/src/services/template.service.ts`
+
+**How it works.** `assertInternal` limits reads to `ADMIN` and `STAFF`; `createTemplate` additionally requires `ADMIN`. It rejects duplicate names (409), requires an existing **active** plan, rejects the same `(product, variant)` appearing on two lines, and resolves every line through `resolvePricedLine` — which both validates ownership of the variant and yields the server-side default price when the client omits `unitPrice`. Header and lines are inserted in one transaction with a `TEMPLATE_CREATED` audit row, then the template is reloaded and returned with `lineCount` and `totalValue`.
+
+**Why this design.** The template is the acceptance criterion for pre-fill (AC2.3), so its price must be reproducible even if the client posts stale numbers — which is why `unitPrice` is optional and server-filled. Rejecting duplicate product lines keeps "quantity 2" and "quantity 3" from silently becoming two rows that mean five; the UI shows the same message before submitting. `withLines` costs exactly two queries regardless of how many templates are listed.
+
+**Q&A — If a client sends an explicit `unitPrice`, can it undercut the catalogue price?**
+It can, intentionally: `unitPrice` is a negotiated offer, which is why the column exists on the template line. The server only fills it when it is omitted, and the value is validated as a non-negative amount with two decimals.
+**Q&A — Why can Staff read templates but not create them?**
+Staff use templates to build quotations, which is their daily work; authoring what the company offers is reserved for Admin, matching the brief's permission split (the same split as discount rules).
+
+---
+
+## 12. Routes
+
+### 12.1 `server/src/routes/product.routes.ts`, `plan.routes.ts`, `template.routes.ts`
+
+**How it works.** Each router applies `authenticate` once at the router level. Products: `GET /`, `GET /:id` for any signed-in user; `POST /`, `PATCH /:id`, `DELETE /:id`, `POST /:id/variants`, `DELETE /:id/variants/:variantId` behind `requireRole('ADMIN')`. Plans: the same shape, with `PATCH /:id` documented as the flag toggle used by the plan cards. Templates: `GET /` and `GET /:id` for `ADMIN`/`STAFF`, `POST /` for `ADMIN`. Every write validates its body with the matching Zod schema before the service runs, and every route parses its id with `parsePositiveIntParam`. `routes/index.ts` mounts them at `/products`, `/plans` and `/quotation-templates`.
+
+**Why this design.** The router-level `authenticate` means a new endpoint inside these modules is authenticated by default — forgetting a role check yields "any signed-in user", not "the public". Validation sits in the route layer, so an invalid body never reaches a service and never opens a transaction.
+
+**Q&A — Why does the customer portal need `GET /products` at all if templates are internal?**
+Because a customer must see what their subscription contains and what add-ons they may switch on. The endpoint is authenticated and returns only active products, so retired catalogue items stay invisible.
+**Q&A — Are the role checks here the only enforcement?**
+No. Each service repeats the assertion, and the sidebar and `RoleRoute` hide the screens. The route check produces the 403 an attacker sees; the service check means a future route that forgets it still cannot write.
+
+---
+
+## 13. Frontend
+
+### 13.1 New UI primitives — `client/src/components/ui/`
+
+**How it works.** `Modal` renders through `createPortal` to `document.body`, closes on Escape and on a backdrop click (the overlay compares `event.target` to `currentTarget`, so a click inside the panel never dismisses the form), locks body scroll while open, and focuses the first field. `Switch` is a `role="switch"` button with `aria-checked`, a busy state and a keyboard-focus ring. `Badge` provides six tones used for product types, plan state and flags. `SelectField`, `TextAreaField`, `TextField` share the same label / error / hint contract as the existing fields. `PageHeader` pairs a title with a one-line description and an optional action. `EmptyState` turns emptiness into a next step. `IconButton` gives icon-only actions an accessible name.
+
+**Why this design.** Every catalog form needed a dialog, and hand-rolling one per screen would have produced four different Escape behaviours. The `event.target === event.currentTarget` comparison is the detail that makes a dialog usable: with a plain `onClick` on the overlay, a drag-select that ends outside the text field closes the form and discards the user's work.
+
+**Q&A — Why render the modal in a portal instead of inside the page?**
+Because the page's containers establish stacking and overflow contexts; a form inside one of them would clip or sit under the sticky header. A portal to `document.body` guarantees the dialog sits above everything.
+**Q&A — How is the switch accessible without a checkbox?**
+It is a `<button role="switch">` with `aria-checked` and a descriptive `aria-label` such as "Allow pause for Monthly Pro", so a screen reader announces both the state and what it controls, and `aria-busy` while the PATCH is in flight.
+
+### 13.2 Shell and navigation — `Sidebar`, `AppShell`, `Header`, `RoleRoute`, `lib/navigation.ts`
+
+**How it works.** `NAV_ITEMS` lists each screen with its path, label, icon and permitted roles; `navItemsForRole` filters it for the sidebar and the same list documents what `RoleRoute` protects. `Sidebar` renders a sticky plum rail on desktop and, below `lg`, a drawer that is mounted only while open with an explicit close button. `AppShell` composes sidebar, header and a `max-w-6xl` main column. `RoleRoute` redirects a role without access to `/`. `titleForPath` supplies the header's page title.
+
+**Why this design.** A single navigation list removes the classic bug where a screen is reachable from the menu but not guarded, or guarded but invisible. Rendering the mobile drawer only while open avoids the alternative — keeping invisible links in the tab order — which is why the earlier `inert` approach was dropped: React 18 typings do not expose that attribute, and a drawer that is not in the DOM cannot be tabbed into.
+
+**Q&A — Is hiding the link a security control?**
+No, it is guidance. `RoleRoute` keeps a customer out of `/templates`, and `requireRole` on the server is the actual control; the sidebar only stops people from being offered a screen that would refuse them.
+**Q&A — Why a sticky sidebar rather than a top nav bar?**
+The catalogue is now four working areas plus the dashboard, and the brief asks for intuitive navigation with a persistent role indicator. A vertical rail keeps every destination one click away while the header carries identity and sign-out.
+
+### 13.3 Catalog forms — `ProductFormModal`, `VariantFormModal`, `PlanFormModal`, `TemplateFormModal`
+
+**How it works.** Each modal owns its fields, validates locally with the same rules the server applies, submits through `apiRequest`, and maps `ApiError.fieldErrors()` back onto the inputs. `VariantFormModal` shows a live preview panel: product price, the variant surcharge and the resulting effective price — $1,200 + $560 = $1,760 for the Odoo brand. `PlanFormModal` carries the four lifecycle switches and the availability dates. `TemplateFormModal` manages a list of draft lines, prefills a line's unit price from `salesPrice + priceExtra` when a product or variant is chosen, rejects duplicate product/variant pairs before submitting, and shows the running template total in the footer. `ProductsPage` adds client-side search across names, types, notes and variant labels.
+
+**Why this design.** The preview panel is the acceptance criterion made visible: an evaluator can watch the +560 rule apply before saving. Prefilling the unit price from the same arithmetic keeps the form honest — the server still fills it if omitted, so a stale client cannot corrupt it. Duplicate-line detection on the client mirrors the 400 the server returns, turning a failed request into instant guidance.
+
+**Q&A — If the client validates, why does the server validate again?**
+The client check is for speed and clarity; the server check is the control, because anything can post directly to the API. The two rules are written to match so a valid form is never rejected by a surprise server rule.
+**Q&A — Why does the template form send `unitPrice` only when the user typed one?**
+So the server applies the catalogue rule by default. Omitting the field is how the form says "use the list price"; sending it is an explicit negotiated override.
+
+### 13.4 Pages — `ProductsPage`, `PlansPage`, `TemplatesPage`
+
+**How it works.** All three load through `useApiResource(path)` and update their local list from the object each mutation returns, so no refetch is needed. `ProductsPage` renders a searchable ledger: product name and type badge, sales and cost price, notes, and each variant with its `+extra` and effective price, plus add-variant, edit, retire and restore for Admin. `PlansPage` renders plan cards with a colour-coded interval rail (teal for daily/weekly, plum for monthly/yearly), the price in tabular numerals, a "minimum N" line, the availability window, one `Switch` per lifecycle flag that PATCHes a single key, and retire/restore. `TemplatesPage` renders each template as a document panel: plan badge, interval, validity, line count, template value, an itemised table of product / variant / quantity / unit price / line total, and its notes.
+
+**Why this design.** The three screens are deliberately different shapes — a ledger, cards, and documents — because the three things are different: products are a list to search, plans are offers to compare, templates are paperwork to read. Colour encodes the billing interval rather than decorating, so a glance tells you what kind of plan you are looking at. Retired items stay visible to Admin with a muted style, which is what makes "restore" discoverable.
+
+**Q&A — How do these screens satisfy the "no static JSON" rule?**
+Every value — prices, variant surcharges, flags, line totals — comes from the three API calls and ultimately from PostgreSQL. The only literals in the components are labels and layout.
+**Q&A — Why does toggling a flag not reload the whole page?**
+The PATCH returns the updated plan, which replaces that one card in local state. One request, no flicker, and the server remains the source of truth for what was stored.
+
+---
+
+## 14. Verification evidence — Milestone 2
+
+Executed against a freshly created PostgreSQL 18 cluster on port 5433 with a throwaway `DATABASE_URL`, driving the compiled API with 61 assertions.
+
+| Check | Result |
+| :--- | :--- |
+| `server npm run build` (`tsc`) | Exit 0 |
+| `client npm run build` (`tsc` + `vite`) | Exit 0, JS bundle 246.78 kB |
+| Schema applied to a fresh database | 14 tables, 46 indexes |
+| Schema + seed applied a second time | Identical row counts (3 users, 3 products, 2 variants, 4 plans, 3 templates, 6 lines) |
+| Anonymous `GET /products` | 401 |
+| Seeded prices | ERP 1200, add-on 150, support 300 |
+| Odoo variant `priceExtra` / effective price | 560 / **1760** (AC2.1) |
+| Empty body, bad type, negative price, empty PATCH | 400 each, with field messages |
+| Duplicate product name in different case | 409 |
+| Duplicate variant, different case | 409 |
+| Negative `priceExtra` | 400 |
+| Variant on a missing product | 404 |
+| Retire product → customer list / admin list | Hidden / still visible; restore returns it |
+| Seeded plans | 4; Annual Enterprise `autoClose = true`, daily trial `allowRenew = false` (AC2.2) |
+| `availableFrom` serialised | `"2026-01-01"` — no timezone shift |
+| Invalid interval / reversed window / `minQuantity` 0 | 400 each |
+| New plan flags → PATCH one flag → re-read | Persisted across all three reads |
+| Seeded "Enterprise Monthly Starter" | Brand: Odoo line at 1760, total 3970 |
+| Template created without `unitPrice` | Server filled 1760 and 300, total 3820 (AC2.3) |
+| Duplicate line / cross-product variant / unknown plan / no lines | 400 each |
+| Staff reads templates / creates one | 200 / 403 |
+| Staff creates product or plan, toggles a flag | 403 each |
+| Customer creates product, reads templates | 403 / 403 |
+| Three list calls (products, plans, templates) | 6 ms total |
+| **Total** | **61 passed, 0 failed** |
+
+The disposable cluster and the API process were stopped and the cluster directory deleted afterwards; the repository `.env` is unchanged.
+
+---
+
+## 15. Deliberate boundaries at the end of Milestone 2
+
+- Subscription records, the state machine and the customer portal — Milestone 3.
+- Tax rules in the billing engine, discount evaluation and the billing run — Milestone 4.
+- Invoice actions (confirm, cancel, send, print) and payment recording — Milestone 5.
+- Finance dashboard aggregates, filters and the thousand-subscription seed — Milestone 6.
+
+No screen in this milestone displays a number that is not stored in PostgreSQL.

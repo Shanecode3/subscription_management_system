@@ -77,8 +77,18 @@ CREATE TABLE IF NOT EXISTS products (
     notes       TEXT,
     is_active   BOOLEAN        NOT NULL DEFAULT TRUE,
     created_at  TIMESTAMPTZ    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at  TIMESTAMPTZ    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at  TIMESTAMPTZ    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_products_name UNIQUE (name)
 );
+
+-- Milestone 2 upgrade path: a Milestone 1 database predates these constraints.
+-- Guarded so this file stays idempotent on both fresh and existing databases.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_products_name') THEN
+        ALTER TABLE products ADD CONSTRAINT uq_products_name UNIQUE (name);
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_products_type ON products (type) WHERE is_active = TRUE;
 
@@ -101,8 +111,18 @@ CREATE TABLE IF NOT EXISTS product_variants (
     CONSTRAINT uq_product_variant UNIQUE (product_id, attribute_name, attribute_value),
     CONSTRAINT chk_variant_attribute_not_blank CHECK (
         length(btrim(attribute_name)) > 0 AND length(btrim(attribute_value)) > 0
-    )
+    ),
+    CONSTRAINT chk_variant_price_extra CHECK (price_extra >= 0)
 );
+
+-- Milestone 2 upgrade path for databases created before the surcharge rule.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_variant_price_extra') THEN
+        ALTER TABLE product_variants
+            ADD CONSTRAINT chk_variant_price_extra CHECK (price_extra >= 0);
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_variants_product ON product_variants (product_id);
 
@@ -127,8 +147,16 @@ CREATE TABLE IF NOT EXISTS subscription_plans (
     updated_at       TIMESTAMPTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT chk_plan_availability_dates CHECK (
         available_to IS NULL OR available_to >= available_from
-    )
+    ),
+    CONSTRAINT uq_plans_name UNIQUE (name)
 );
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_plans_name') THEN
+        ALTER TABLE subscription_plans ADD CONSTRAINT uq_plans_name UNIQUE (name);
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_plans_active ON subscription_plans (is_active, billing_interval);
 
@@ -147,8 +175,16 @@ CREATE TABLE IF NOT EXISTS quotation_templates (
     validity_days INT            NOT NULL DEFAULT 30 CHECK (validity_days > 0),
     notes         TEXT,
     created_at    TIMESTAMPTZ    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at    TIMESTAMPTZ    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at    TIMESTAMPTZ    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_templates_name UNIQUE (name)
 );
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_templates_name') THEN
+        ALTER TABLE quotation_templates ADD CONSTRAINT uq_templates_name UNIQUE (name);
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_templates_plan ON quotation_templates (plan_id);
 

@@ -4,6 +4,9 @@ import { asyncHandler } from '../middleware/validate.middleware';
 import { sendSuccess } from '../utils/response';
 import { authRouter } from './auth.routes';
 import { adminRouter } from './admin.routes';
+import { productRouter } from './product.routes';
+import { planRouter } from './plan.routes';
+import { templateRouter } from './template.routes';
 
 export const apiRouter = Router();
 
@@ -34,3 +37,6 @@ apiRouter.get(
 
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/admin', adminRouter);
+apiRouter.use('/products', productRouter);
+apiRouter.use('/plans', planRouter);
+apiRouter.use('/quotation-templates', templateRouter);

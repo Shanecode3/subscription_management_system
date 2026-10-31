@@ -1,6 +1,15 @@
-import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
+import pg, { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
+
+/**
+ * PostgreSQL DATE columns come back as JS Date objects anchored to local
+ * midnight. Serialising one with toISOString() shifts the calendar day in any
+ * non-UTC timezone (IST is +05:30), so a plan starting 2026-01-01 would be sent
+ * as 2025-12-31T18:30:00Z. Keeping the raw 'YYYY-MM-DD' text removes the whole
+ * class of off-by-one bugs around billing and availability dates.
+ */
+pg.types.setTypeParser(pg.types.builtins.DATE, (value: string) => value);
 
 /**
  * A single pool for the whole process. Creating a Pool per request is the most

@@ -88,12 +88,12 @@ These are local seed accounts for evaluation only.
 | `npm run typecheck` | Type-check only |
 | `npm run db:create` | Create `brightloop_db` if it does not exist |
 | `npm run db:init` | Apply `src/db/schema.sql` (idempotent) |
-| `npm run db:seed` | Seed the three demo accounts |
+| `npm run db:seed` | Seed the three demo accounts, the catalogue (products + variants), the plans and the quotation templates |
 | `npm run db:setup` | All three of the above, in order |
 
 ---
 
-## API surface (Milestone 1)
+## API surface (Milestones 1–2)
 
 Base path: `/api/v1`
 
@@ -107,6 +107,21 @@ Base path: `/api/v1`
 | `GET` | `/auth/me` | Authenticated |
 | `POST` | `/admin/users/staff` | **Admin only** |
 | `GET` | `/admin/users` | Admin, Staff |
+| `GET` | `/products` | Authenticated — customers see active products only |
+| `GET` | `/products/:id` | Authenticated |
+| `POST` | `/products` | **Admin only** |
+| `PATCH` | `/products/:id` | **Admin only** |
+| `DELETE` | `/products/:id` | **Admin only** — retires the product, keeps history |
+| `POST` | `/products/:id/variants` | **Admin only** — attribute, value, `priceExtra` |
+| `DELETE` | `/products/:id/variants/:variantId` | **Admin only** |
+| `GET` | `/plans` | Authenticated — customers see active, currently-available plans |
+| `GET` | `/plans/:id` | Authenticated |
+| `POST` | `/plans` | **Admin only** |
+| `PATCH` | `/plans/:id` | **Admin only** — also the single-flag toggle |
+| `DELETE` | `/plans/:id` | **Admin only** — retires the plan |
+| `GET` | `/quotation-templates` | Admin, Staff |
+| `GET` | `/quotation-templates/:id` | Admin, Staff |
+| `POST` | `/quotation-templates` | **Admin only** |
 
 Responses use one envelope everywhere:
 
@@ -123,14 +138,15 @@ Responses use one envelope everywhere:
 server/src/
   config/      environment parsing (fails fast on missing values)
   db/          schema.sql, pool, create/init/seed scripts
-  repositories/  SQL only
+  repositories/  SQL only (products, plans, quotation templates, users, audit)
   services/      business rules only
   middleware/    auth, validation, errors, request logging
   routes/        HTTP surface only
+  utils/         errors, validators (auth + catalog), JWT, logger, response, money, params
 client/src/
-  lib/           api client, auth context, types
-  components/    ui primitives + layout
-  pages/         auth screens + dashboard
+  lib/           api client, auth context, types, formatting, navigation, hooks
+  components/    ui primitives, layout, catalog forms
+  pages/         auth screens, dashboard, products, plans, templates
 ```
 
 Dependency direction is one way: `routes → services → repositories → db`. Services never build SQL, repositories never decide permissions, and routes never contain business rules.

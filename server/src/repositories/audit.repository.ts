@@ -1,7 +1,16 @@
 import type { PoolClient } from 'pg';
 import { query } from '../db/pool';
 
-export type AuditEntityType = 'USER' | 'PRODUCT' | 'PLAN' | 'SUBSCRIPTION' | 'INVOICE' | 'PAYMENT' | 'DISCOUNT';
+export type AuditEntityType =
+  | 'USER'
+  | 'PRODUCT'
+  | 'PRODUCT_VARIANT'
+  | 'PLAN'
+  | 'QUOTATION_TEMPLATE'
+  | 'SUBSCRIPTION'
+  | 'INVOICE'
+  | 'PAYMENT'
+  | 'DISCOUNT';
 
 /**
  * Append-only audit trail. Failures are logged but never surface to the caller:
