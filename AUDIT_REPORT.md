@@ -178,23 +178,7 @@ A complete automated operational audit was executed against the running applicat
 
 ## 5. Artifact Files Catalog
 
-All test output files are saved in the project tree and ready for inspection:
-- `test-reports/audit_summary.json` (Full machine-readable telemetry)
-- `test-reports/01_signup_page.png`
-- `test-reports/02_signup_password_weak.png`
-- `test-reports/03_signup_password_valid.png`
-- `test-reports/04_login_page.png`
-- `test-reports/05_admin_dashboard.png`
-- `test-reports/06_products_catalog.png`
-- `test-reports/07_plans_page.png`
-- `test-reports/08_subscriptions_list.png`
-- `test-reports/09_subscription_detail_stepper.png`
-- `test-reports/10_billing_day_view.png`
-- `test-reports/11_invoices_list.png`
-- `test-reports/12_invoice_detail.png`
-- `test-reports/12b_invoice_print_view.png`
-- `test-reports/13_finance_dashboard.png`
-- `test-reports/14_customer_portal.png`
+The audit harness and its screenshots were kept out of the submitted repository: `test_scenes_audit.py` and the `test-reports/` folder (15 Playwright screenshots plus `audit_summary.json`) were removed in the follow-up cleanup commit, because they are audit output rather than application code. The observations they produced are recorded in §2–§3 above.
 
 ---
 
@@ -214,8 +198,11 @@ Every actionable item from §4 has been addressed. The changes are logged featur
 
 - **Products** (`/products`): the six-column table is now a responsive card grid, one card per product, with a type-coloured rail (plum = `Software`, teal = `Service`, amber = `Add-on`), a sales-price hierarchy, an explicit variant list (`Brand: Odoo +$560.00 → $1,760.00`), notes, and admin-only cost/margin and action buttons.
 - **Plans** (`/plans`): each card gained a "What this plan includes" list derived from the plan row — charge per interval, annualised value at the minimum quantity, ordering-window state, permitted self-service actions and the close rule. The lifecycle switch panel stays, now admin-only, so the same rules are not stated twice to a reader who cannot change them.
+- **Dashboard** (`/`): the "Platform foundation" panel (`FOUNDATION_ITEMS` — schema, auth, RBAC, forgot-password checklist with the "Milestone 1 complete" badge) was removed. The sign-in header, role badge, finance shortcuts, "Your access" list and account card remain.
 
-### 6.2 Known housekeeping items (not defects)
+### 6.2 Housekeeping — resolved
 
-- `test-reports/` and `test_scenes_audit.py` were committed in `bec1180`; they are audit artifacts, not application code.
-- The audit run left fixture rows in the live database (`Audit ERP Platform …`, `Audit Monthly Gold …`) and one customer. They exercise real flows but should be retired before the demo video for a clean catalogue.
+- `test-reports/` and `test_scenes_audit.py` were committed in `bec1180`; both were removed from the repository in the cleanup commit, along with the accidental commit's contents.
+- The audit rows were purged from the live database in one transaction, after writing a JSON backup of every affected row to the OS temp folder. Removed: 6 users (`audit_user_*`, `goodstaff_*`), 3 `Audit ERP Platform …` products with their variants, 4 test plans (`Audit Monthly Gold …` ×3 and `Test Pro`), 2 audit quotation templates, the 2 subscriptions built from them, their 2 invoices and 2 payments, and the `DISC1USE_*` discount promotions. What remains is exactly the seed catalogue: 3 products, 4 plans, 3 templates, 3 accounts (`admin@`, `staff@`, `customer@brightloop.com`), `SUB-2026-1001`/`1002` and their draft invoices.
+
+> **Consequence for the demo:** the two recorded payments and the paid invoice lived on the audit subscriptions, so the Finance dashboard now reports **$0.00 collected** and **2 active subscriptions** until a payment is recorded during the demo. Recording one against `INV-2026-1011` or `INV-2026-1014` restores it in a way that is genuinely live.

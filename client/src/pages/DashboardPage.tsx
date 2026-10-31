@@ -1,13 +1,9 @@
 import {
   CalendarDays,
   CheckCircle2,
-  Database,
-  KeyRound,
   LineChart,
-  Mail,
   PlayCircle,
   ReceiptText,
-  ShieldCheck,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/layout/AppShell';
@@ -41,13 +37,6 @@ const ROLE_CAPABILITIES: Record<Role, { summary: string; items: string[] }> = {
     ],
   },
 };
-
-const FOUNDATION_ITEMS = [
-  { icon: Database, label: 'Normalized PostgreSQL schema', detail: '14 tables with foreign keys, checks and composite indexes' },
-  { icon: KeyRound, label: 'Password authentication', detail: 'bcrypt hashing with signed JWT sessions' },
-  { icon: ShieldCheck, label: 'Role-based access control', detail: 'Server-side role guards on every protected route' },
-  { icon: Mail, label: 'Forgot password flow', detail: 'Hashed, one-hour reset tokens' },
-];
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -141,34 +130,6 @@ export function DashboardPage() {
             </dl>
           </section>
         </div>
-
-        <section className="card p-6">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-              Platform foundation
-            </h2>
-            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
-              Milestone 1 complete
-            </span>
-          </div>
-
-          <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-            {FOUNDATION_ITEMS.map(({ icon: Icon, label, detail }) => (
-              <li
-                key={label}
-                className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3.5"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white ring-1 ring-inset ring-slate-200">
-                  <Icon className="h-4 w-4 text-plum-700" aria-hidden="true" />
-                </span>
-                <div>
-                  <p className="text-sm font-semibold text-ink">{label}</p>
-                  <p className="mt-0.5 text-xs leading-relaxed text-slate-600">{detail}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
       </div>
     </AppShell>
   );
