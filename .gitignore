@@ -25,3 +25,7 @@ Thumbs.db
 # Vite
 client/dist/
 *.local
+
+# Visual verification test artifacts
+screenshots/
+visual_verify*.py

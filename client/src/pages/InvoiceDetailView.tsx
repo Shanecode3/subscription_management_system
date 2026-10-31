@@ -8,6 +8,7 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { PageHeader } from '../components/ui/PageHeader';
+import { PaymentQrCode } from '../components/ui/PaymentQrCode';
 import { ApiError, apiRequest } from '../lib/api';
 import { useAuth } from '../lib/auth-context';
 import { formatDate, formatMoney } from '../lib/format';
@@ -244,47 +245,57 @@ export function InvoiceDetailView() {
                 </dl>
               </section>
 
-              <section className="card p-5" aria-label="Invoice totals">
-                <h2 className="text-sm font-semibold text-ink">Totals</h2>
-                <dl className="mt-4 space-y-2 text-sm">
-                  <div className="flex items-center justify-between">
-                    <dt className="text-slate-600">Subtotal</dt>
-                    <dd className="tabular-nums text-ink">{formatMoney(invoice.subtotal)}</dd>
-                  </div>
-                  {invoice.discountTotal > 0 ? (
+              <div className="space-y-6">
+                <section className="card p-5" aria-label="Invoice totals">
+                  <h2 className="text-sm font-semibold text-ink">Totals</h2>
+                  <dl className="mt-4 space-y-2 text-sm">
                     <div className="flex items-center justify-between">
-                      <dt className="text-slate-600">Discount</dt>
-                      <dd className="tabular-nums text-emerald-700">
-                        −{formatMoney(invoice.discountTotal)}
+                      <dt className="text-slate-600">Subtotal</dt>
+                      <dd className="tabular-nums text-ink">{formatMoney(invoice.subtotal)}</dd>
+                    </div>
+                    {invoice.discountTotal > 0 ? (
+                      <div className="flex items-center justify-between">
+                        <dt className="text-slate-600">Discount</dt>
+                        <dd className="tabular-nums text-emerald-700">
+                          −{formatMoney(invoice.discountTotal)}
+                        </dd>
+                      </div>
+                    ) : null}
+                    {taxGroups.map((group) => (
+                      <div key={group.key} className="flex items-center justify-between">
+                        <dt className="text-slate-600">
+                          {group.name} ({group.rate}%)
+                        </dt>
+                        <dd className="tabular-nums text-ink">{formatMoney(group.amount)}</dd>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between border-t border-slate-200 pt-2">
+                      <dt className="font-semibold text-ink">Total</dt>
+                      <dd className="text-base font-semibold tabular-nums text-ink">
+                        {formatMoney(invoice.totalAmount)}
                       </dd>
                     </div>
-                  ) : null}
-                  {taxGroups.map((group) => (
-                    <div key={group.key} className="flex items-center justify-between">
-                      <dt className="text-slate-600">
-                        {group.name} ({group.rate}%)
-                      </dt>
-                      <dd className="tabular-nums text-ink">{formatMoney(group.amount)}</dd>
+                    <div className="flex items-center justify-between">
+                      <dt className="text-slate-600">Paid</dt>
+                      <dd className="tabular-nums text-emerald-700">{formatMoney(invoice.amountPaid)}</dd>
                     </div>
-                  ))}
-                  <div className="flex items-center justify-between border-t border-slate-200 pt-2">
-                    <dt className="font-semibold text-ink">Total</dt>
-                    <dd className="text-base font-semibold tabular-nums text-ink">
-                      {formatMoney(invoice.totalAmount)}
-                    </dd>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <dt className="text-slate-600">Paid</dt>
-                    <dd className="tabular-nums text-emerald-700">{formatMoney(invoice.amountPaid)}</dd>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <dt className="font-medium text-ink">Balance due</dt>
-                    <dd className="font-semibold tabular-nums text-amber-700">
-                      {formatMoney(invoice.balanceDue)}
-                    </dd>
-                  </div>
-                </dl>
-              </section>
+                    <div className="flex items-center justify-between">
+                      <dt className="font-medium text-ink">Balance due</dt>
+                      <dd className="font-semibold tabular-nums text-amber-700">
+                        {formatMoney(invoice.balanceDue)}
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+
+                {invoice.balanceDue > 0 && invoice.status === 'Confirmed' ? (
+                  <PaymentQrCode
+                    invoiceNumber={invoice.invoiceNumber}
+                    amount={invoice.balanceDue}
+                    customerName={invoice.customerName}
+                  />
+                ) : null}
+              </div>
             </div>
 
             <section className="card overflow-hidden" aria-label="Invoice lines">

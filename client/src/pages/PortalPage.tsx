@@ -1,4 +1,4 @@
-import { CalendarDays, ReceiptText } from 'lucide-react';
+import { CalendarDays, ReceiptText, Sparkles } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { AppShell } from '../components/layout/AppShell';
 import { StatusStepper } from '../components/subscriptions/StatusStepper';
@@ -95,6 +95,28 @@ export function PortalPage() {
     [subscriptions],
   );
 
+  const stats = useMemo(() => {
+    let activeSubs = 0;
+    let totalPerPeriod = 0;
+    let activeAddons = 0;
+    let totalAddonAmount = 0;
+
+    for (const s of subscriptions) {
+      if (s.status === 'Active') {
+        activeSubs += 1;
+        totalPerPeriod += s.total;
+        totalAddonAmount += s.addonTotal;
+        for (const line of s.lines) {
+          if (line.isAddon && line.isAddonActive) {
+            activeAddons += 1;
+          }
+        }
+      }
+    }
+
+    return { activeSubs, totalPerPeriod, activeAddons, totalAddonAmount };
+  }, [subscriptions]);
+
   return (
     <AppShell>
       <div className="space-y-6">
@@ -133,6 +155,41 @@ export function PortalPage() {
           />
         ) : (
           <div className="space-y-5">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="card px-4 py-3">
+                <p className="text-xs font-medium text-slate-500">Active Contracts</p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums text-ink">{stats.activeSubs}</p>
+                <p className="mt-0.5 text-xs text-slate-400">
+                  {subscriptions.length} total contract{subscriptions.length === 1 ? '' : 's'} on file
+                </p>
+              </div>
+              <div className="card px-4 py-3">
+                <p className="text-xs font-medium text-slate-500">Active Period Commitment</p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums text-plum-700">
+                  {formatMoney(stats.totalPerPeriod)}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-400">Total recurring cost across all active plans</p>
+              </div>
+              <div className="card px-4 py-3">
+                <p className="text-xs font-medium text-slate-500">Active Add-Ons</p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums text-emerald-700">
+                  {stats.activeAddons}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-400">
+                  {formatMoney(stats.totalAddonAmount)}/period in configurable options
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-plum-200 bg-plum-50/60 p-4 text-xs">
+              <div className="flex items-center gap-2.5">
+                <Sparkles className="h-4 w-4 shrink-0 text-plum-700" />
+                <p className="text-plum-900">
+                  <span className="font-semibold">Looking to lower subscription costs?</span> You can toggle add-ons at any time below, or contact your Brightloop Account Manager to switch to annual billing for extended discount eligibility.
+                </p>
+              </div>
+            </div>
+
             {subscriptions.map((subscription) => {
               const canToggleAddons = subscription.status === 'Active';
               const lifecycleMoves = subscription.allowedTransitions

@@ -2,6 +2,7 @@ import { ArrowLeft, Printer } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Alert } from '../components/ui/Alert';
+import { PaymentQrCode } from '../components/ui/PaymentQrCode';
 import { ApiError, apiRequest } from '../lib/api';
 import { useAuth } from '../lib/auth-context';
 import { formatDate, formatMoney } from '../lib/format';
@@ -212,7 +213,22 @@ export function PrintInvoiceView() {
             </tbody>
           </table>
 
-          <section className="mt-6 flex flex-wrap justify-end gap-8">
+          <section className="mt-6 flex flex-wrap items-start justify-between gap-8">
+            <div className="max-w-[280px]">
+              {invoice.balanceDue > 0 ? (
+                <PaymentQrCode
+                  invoiceNumber={invoice.invoiceNumber}
+                  amount={invoice.balanceDue}
+                  customerName={invoice.customerName}
+                />
+              ) : (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs font-medium text-emerald-800">
+                  <p className="font-semibold text-emerald-900">Paid in Full</p>
+                  <p className="mt-0.5 text-emerald-700">No balance remaining on this invoice.</p>
+                </div>
+              )}
+            </div>
+
             <dl className="min-w-[260px] space-y-1.5 text-sm">
               <div className="flex items-center justify-between gap-8">
                 <dt className="text-slate-600">Subtotal</dt>
