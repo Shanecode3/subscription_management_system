@@ -11,8 +11,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:create": "tsx src/db/create-database.ts",
     "db:init": "tsx src/db/init.ts",
-    "db:seed": "tsx src/db/seed.ts",
-    "db:seed:perf": "tsx src/db/seed_performance.ts",
+    "db:seed": "npm run db:init && tsx src/db/seed.ts",
+    "db:seed:perf": "npm run db:init && tsx src/db/seed_performance.ts",
     "db:setup": "npm run db:create && npm run db:init && npm run db:seed"
   },
   "dependencies": {

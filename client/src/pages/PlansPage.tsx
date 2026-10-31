@@ -1,4 +1,4 @@
-import { Archive, CalendarClock, Pencil, Plus, RotateCcw } from 'lucide-react';
+import { Archive, CalendarClock, Check, Pencil, Plus, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import { PlanFormModal } from '../components/catalog/PlanFormModal';
 import { AppShell } from '../components/layout/AppShell';
@@ -10,7 +10,7 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { Switch } from '../components/ui/Switch';
 import { ApiError, apiRequest } from '../lib/api';
 import { useAuth } from '../lib/auth-context';
-import { billingSuffix, formatDate, formatMoney, intervalLabel } from '../lib/format';
+import { billingSuffix, formatDate, formatMoney, todayIso } from '../lib/format';
 import { PLAN_FLAGS, type PlanFlagKey } from '../lib/plan-flags';
 import type { BillingInterval, Plan } from '../lib/types';
 import { useApiResource } from '../lib/use-api-resource';
@@ -27,6 +27,69 @@ const INTERVAL_ACCENT: Record<BillingInterval, string> = {
   monthly: 'bg-plum-400',
   yearly: 'bg-plum-700',
 };
+
+const INTERVALS_PER_YEAR: Record<BillingInterval, number> = {
+  daily: 365,
+  weekly: 52,
+  monthly: 12,
+  yearly: 1,
+};
+
+/** The three things a subscriber is allowed to do to their own contract. */
+const SELF_SERVICE: { key: PlanFlagKey; verb: string }[] = [
+  { key: 'allowPause', verb: 'pause and resume' },
+  { key: 'allowRenew', verb: 'renew' },
+  { key: 'allowEarlyClose', verb: 'close early' },
+];
+
+function sentenceList(parts: string[]): string {
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(', ')} or ${parts[parts.length - 1]}`;
+}
+
+/**
+ * Reads a plan's stored columns as the plain sentences a buyer needs. Every
+ * line is derived from the row, so there is no free-text description that can
+ * drift away from the price and the lifecycle switches shown underneath it.
+ */
+function planOffers(plan: Plan): string[] {
+  const unit = billingSuffix(plan.billingInterval);
+  const minimum = plan.minQuantity === 1 ? '1 unit' : `${plan.minQuantity} units`;
+  const today = todayIso();
+
+  const offers = [
+    `Charged ${formatMoney(plan.price)} per ${unit}, ${minimum} at a time`,
+    `About ${formatMoney(plan.price * INTERVALS_PER_YEAR[plan.billingInterval] * plan.minQuantity)} a year at the minimum quantity`,
+  ];
+
+  const closesOn = plan.availableTo ? formatDate(plan.availableTo) : null;
+  if (plan.availableFrom && today < plan.availableFrom) {
+    offers.push(
+      `Orders open on ${formatDate(plan.availableFrom)}${closesOn ? ` and close on ${closesOn}` : ''}`,
+    );
+  } else if (plan.availableTo && today > plan.availableTo) {
+    offers.push(`No longer orderable — the window closed on ${closesOn}`);
+  } else {
+    offers.push(`Open to order now${closesOn ? ` until ${closesOn}` : ' with no end date'}`);
+  }
+
+  const selfService = SELF_SERVICE.filter((action) => plan[action.key]).map(
+    (action) => action.verb,
+  );
+  offers.push(
+    selfService.length > 0
+      ? `Subscribers can ${sentenceList(selfService)} themselves`
+      : 'Subscribers cannot pause, renew or close it themselves',
+  );
+
+  offers.push(
+    plan.autoClose
+      ? 'Closes by itself on its expiry date'
+      : 'Stays open past expiry until it is closed manually',
+  );
+
+  return offers;
+}
 
 export function PlansPage() {
   const { user, token } = useAuth();
@@ -184,19 +247,14 @@ export function PlansPage() {
 
                 <div className="flex h-full flex-col p-5 pl-6">
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h2
-                        className={cx(
-                          'text-base font-semibold leading-tight',
-                          plan.isActive ? 'text-ink' : 'text-slate-500',
-                        )}
-                      >
-                        {plan.name}
-                      </h2>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {intervalLabel(plan.billingInterval)} billing · minimum {plan.minQuantity}
-                      </p>
-                    </div>
+                    <h2
+                      className={cx(
+                        'text-base font-semibold leading-tight',
+                        plan.isActive ? 'text-ink' : 'text-slate-500',
+                      )}
+                    >
+                      {plan.name}
+                    </h2>
                     <Badge tone={plan.isActive ? 'emerald' : 'neutral'}>
                       {plan.isActive ? 'Active' : 'Retired'}
                     </Badge>
@@ -210,35 +268,49 @@ export function PlansPage() {
                       / {billingSuffix(plan.billingInterval)}
                     </span>
                   </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Available {formatDate(plan.availableFrom)} to {formatDate(plan.availableTo)}
-                  </p>
 
-                  <div className="mt-4 divide-y divide-slate-100 border-t border-slate-100">
-                    {PLAN_FLAGS.map((flag) => (
-                      <div
-                        key={flag.key}
-                        className="flex items-center justify-between gap-3 py-2.5"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-ink">{flag.label}</p>
-                          <p className="text-xs leading-snug text-slate-500">{flag.description}</p>
-                        </div>
-                        {isAdmin ? (
+                  <div className="mt-4 rounded-lg bg-slate-50 px-3 py-3">
+                    <p className="text-xs font-semibold text-slate-700">What this plan includes</p>
+                    <ul className="mt-2 space-y-1.5">
+                      {planOffers(plan).map((offer) => (
+                        <li
+                          key={offer}
+                          className="flex gap-2 text-xs leading-snug text-slate-600"
+                        >
+                          <Check
+                            className="mt-0.5 h-3.5 w-3.5 shrink-0 text-teal-600"
+                            aria-hidden="true"
+                          />
+                          <span>{offer}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/*
+                    The switch panel is an editing surface, so only admins get it.
+                    Everyone else reads the same rules in the plain-language list
+                    above, which is why the rows are not repeated as static badges.
+                  */}
+                  {isAdmin ? (
+                    <div className="mt-4 divide-y divide-slate-100 border-t border-slate-100">
+                      <p className="pt-3 text-xs font-semibold text-slate-700">Lifecycle rules</p>
+                      {PLAN_FLAGS.map((flag) => (
+                        <div key={flag.key} className="flex items-center justify-between gap-3 py-2.5">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-ink">{flag.label}</p>
+                            <p className="text-xs leading-snug text-slate-500">{flag.description}</p>
+                          </div>
                           <Switch
                             label={`${flag.label} for ${plan.name}`}
                             checked={plan[flag.key]}
                             isBusy={pendingFlag?.planId === plan.id && pendingFlag.key === flag.key}
                             onChange={(next) => toggleFlag(plan, flag.key, next)}
                           />
-                        ) : (
-                          <Badge tone={plan[flag.key] ? 'emerald' : 'neutral'}>
-                            {plan[flag.key] ? 'On' : 'Off'}
-                          </Badge>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
 
                   {isAdmin ? (
                     <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-4">

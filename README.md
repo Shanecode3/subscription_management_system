@@ -88,8 +88,8 @@ These are local seed accounts for evaluation only.
 | `npm run typecheck` | Type-check only |
 | `npm run db:create` | Create `brightloop_db` if it does not exist |
 | `npm run db:init` | Apply `src/db/schema.sql` (idempotent) |
-| `npm run db:seed` | Seed the three demo accounts, the catalogue (products + variants), the plans, the quotation templates and, when none exist yet, two demo subscriptions |
-| `npm run db:seed:perf` | Generate the performance dataset (140 customers, 1,050 subscriptions, 2,700 invoices, 1,847 payments), benchmark the dashboard SQL with `EXPLAIN ANALYZE`; add `-- --reset` to rebuild it |
+| `npm run db:seed` | Re-apply the schema, then seed the three demo accounts, the catalogue (products + variants), the plans, the quotation templates and, when none exist yet, two demo subscriptions |
+| `npm run db:seed:perf` | Re-apply the schema, then generate the performance dataset (140 customers, 1,050 subscriptions, 2,700 invoices, 1,847 payments), benchmark the dashboard SQL with `EXPLAIN ANALYZE`; add `-- --reset` to rebuild it |
 | `npm run db:setup` | All three of the above, in order |
 
 ---

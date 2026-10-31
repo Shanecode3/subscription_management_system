@@ -11,6 +11,7 @@ import { IconButton } from '../components/ui/IconButton';
 import { PageHeader } from '../components/ui/PageHeader';
 import { ApiError, apiRequest } from '../lib/api';
 import { useAuth } from '../lib/auth-context';
+import { cx } from '../lib/cx';
 import { formatMoney } from '../lib/format';
 import type { Product, ProductType, ProductVariant } from '../lib/types';
 import { useApiResource } from '../lib/use-api-resource';
@@ -19,6 +20,17 @@ const TYPE_TONE: Record<ProductType, BadgeTone> = {
   Software: 'plum',
   Service: 'teal',
   'Add-on': 'amber',
+};
+
+/**
+ * The rail on the left edge repeats the type badge in colour, so a wall of
+ * cards can be scanned by category without reading every label. It carries the
+ * same tone as the badge — the colour is the type, not decoration.
+ */
+const TYPE_ACCENT: Record<ProductType, string> = {
+  Software: 'bg-plum-600',
+  Service: 'bg-teal-600',
+  'Add-on': 'bg-amber-400',
 };
 
 function sortProducts(products: Product[]): Product[] {
@@ -138,200 +150,188 @@ export function ProductsPage() {
 
         {actionError ? <Alert tone="error">{actionError}</Alert> : null}
 
-        <div className="card overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
-            <div className="relative w-full sm:w-80">
-              <Search
-                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-                aria-hidden="true"
-              />
-              <input
-                type="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search name, type or variant"
-                aria-label="Search products"
-                className="field-input h-10 pl-9"
-              />
-            </div>
-            <p className="text-xs text-slate-500">
-              {visibleProducts.length} of {products.length} products
-            </p>
+        <div className="card flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div className="relative w-full sm:w-80">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+              aria-hidden="true"
+            />
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search name, type or variant"
+              aria-label="Search products"
+              className="field-input h-10 pl-9"
+            />
           </div>
-
-          {isLoading ? (
-            <div className="space-y-3 p-4">
-              {[0, 1, 2].map((row) => (
-                <div key={row} className="h-10 animate-pulse rounded-lg bg-slate-100" />
-              ))}
-            </div>
-          ) : error ? (
-            <div className="space-y-3 p-4">
-              <Alert tone="error" title="Products could not be loaded">
-                {error}
-              </Alert>
-              <Button variant="secondary" className="w-auto" onClick={reload}>
-                Try again
-              </Button>
-            </div>
-          ) : products.length === 0 ? (
-            <div className="p-4">
-              <EmptyState
-                icon={Package}
-                title="No products yet"
-                description="Add the first product to start building quotation templates and subscriptions."
-                action={
-                  isAdmin ? (
-                    <Button
-                      className="w-auto"
-                      onClick={() => setProductModal({ open: true, product: null })}
-                    >
-                      <Plus className="h-4 w-4" aria-hidden="true" />
-                      New product
-                    </Button>
-                  ) : undefined
-                }
-              />
-            </div>
-          ) : visibleProducts.length === 0 ? (
-            <p className="px-4 py-10 text-center text-sm text-slate-500">
-              No product matches “{search.trim()}”. Try a different word.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[860px] text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50/80 text-left text-xs font-semibold text-slate-500">
-                    <th scope="col" className="px-4 py-2.5">
-                      Product
-                    </th>
-                    <th scope="col" className="px-4 py-2.5">
-                      Type
-                    </th>
-                    <th scope="col" className="px-4 py-2.5 text-right">
-                      Sales price
-                    </th>
-                    <th scope="col" className="px-4 py-2.5 text-right">
-                      Cost price
-                    </th>
-                    <th scope="col" className="px-4 py-2.5">
-                      Variants
-                    </th>
-                    {isAdmin ? (
-                      <th scope="col" className="px-4 py-2.5 text-right">
-                        Actions
-                      </th>
-                    ) : null}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {visibleProducts.map((product) => (
-                    <tr
-                      key={product.id}
-                      className={product.isActive ? undefined : 'bg-slate-50/60'}
-                    >
-                      <td className="max-w-xs px-4 py-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span
-                            className={
-                              product.isActive
-                                ? 'font-semibold text-ink'
-                                : 'font-semibold text-slate-500'
-                            }
-                          >
-                            {product.name}
-                          </span>
-                          {product.isActive ? null : <Badge tone="neutral">Retired</Badge>}
-                        </div>
-                        {product.notes ? (
-                          <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">
-                            {product.notes}
-                          </p>
-                        ) : null}
-                      </td>
-
-                      <td className="px-4 py-3">
-                        <Badge tone={TYPE_TONE[product.type]}>{product.type}</Badge>
-                      </td>
-
-                      <td className="px-4 py-3 text-right font-medium tabular-nums text-ink">
-                        {formatMoney(product.salesPrice)}
-                      </td>
-
-                      <td className="px-4 py-3 text-right tabular-nums text-slate-600">
-                        {formatMoney(product.costPrice)}
-                      </td>
-
-                      <td className="px-4 py-3">
-                        {product.variants.length === 0 ? (
-                          <span className="text-xs text-slate-400">No variants</span>
-                        ) : (
-                          <ul className="space-y-0.5">
-                            {product.variants.map((variant) => (
-                              <li
-                                key={variant.id}
-                                className="flex items-baseline gap-2 text-xs tabular-nums"
-                              >
-                                <span className="font-medium text-ink">
-                                  {variant.attributeName}: {variant.attributeValue}
-                                </span>
-                                {variant.priceExtra > 0 ? (
-                                  <span className="text-teal-700">
-                                    +{formatMoney(variant.priceExtra)}
-                                  </span>
-                                ) : null}
-                                <span className="text-slate-500">{formatMoney(variant.price)}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </td>
-
-                      {isAdmin ? (
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-1">
-                            <IconButton
-                              label={`Add a variant to ${product.name}`}
-                              onClick={() => setVariantProduct(product)}
-                              disabled={busyId === product.id}
-                            >
-                              <Plus className="h-4 w-4" aria-hidden="true" />
-                            </IconButton>
-                            <IconButton
-                              label={`Edit ${product.name}`}
-                              onClick={() => setProductModal({ open: true, product })}
-                              disabled={busyId === product.id}
-                            >
-                              <Pencil className="h-4 w-4" aria-hidden="true" />
-                            </IconButton>
-                            {product.isActive ? (
-                              <IconButton
-                                label={`Retire ${product.name}`}
-                                tone="danger"
-                                onClick={() => retireProduct(product)}
-                                disabled={busyId === product.id}
-                              >
-                                <Archive className="h-4 w-4" aria-hidden="true" />
-                              </IconButton>
-                            ) : (
-                              <IconButton
-                                label={`Restore ${product.name}`}
-                                onClick={() => restoreProduct(product)}
-                                disabled={busyId === product.id}
-                              >
-                                <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                              </IconButton>
-                            )}
-                          </div>
-                        </td>
-                      ) : null}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <p className="text-xs text-slate-500">
+            {visibleProducts.length} of {products.length} products
+          </p>
         </div>
+
+        {isLoading ? (
+          <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            {[0, 1, 2].map((card) => (
+              <div key={card} className="h-64 animate-pulse rounded-xl bg-slate-100" />
+            ))}
+          </div>
+        ) : error ? (
+          <div className="space-y-3">
+            <Alert tone="error" title="Products could not be loaded">
+              {error}
+            </Alert>
+            <Button variant="secondary" className="w-auto" onClick={reload}>
+              Try again
+            </Button>
+          </div>
+        ) : products.length === 0 ? (
+          <EmptyState
+            icon={Package}
+            title="No products yet"
+            description="Add the first product to start building quotation templates and subscriptions."
+            action={
+              isAdmin ? (
+                <Button
+                  className="w-auto"
+                  onClick={() => setProductModal({ open: true, product: null })}
+                >
+                  <Plus className="h-4 w-4" aria-hidden="true" />
+                  New product
+                </Button>
+              ) : undefined
+            }
+          />
+        ) : visibleProducts.length === 0 ? (
+          <p className="card px-4 py-10 text-center text-sm text-slate-500">
+            No product matches “{search.trim()}”. Try a different word.
+          </p>
+        ) : (
+          <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            {visibleProducts.map((product) => (
+              <article
+                key={product.id}
+                className="relative flex h-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-white"
+              >
+                <span
+                  className={cx(
+                    'absolute inset-y-0 left-0 w-1.5',
+                    TYPE_ACCENT[product.type],
+                    !product.isActive && 'opacity-30',
+                  )}
+                  aria-hidden="true"
+                />
+
+                <div className="flex h-full flex-col p-5 pl-6">
+                  <div className="flex items-start justify-between gap-3">
+                    <h2
+                      className={cx(
+                        'text-base font-semibold leading-tight',
+                        product.isActive ? 'text-ink' : 'text-slate-500',
+                      )}
+                    >
+                      {product.name}
+                    </h2>
+                    <div className="flex shrink-0 flex-col items-end gap-1.5">
+                      <Badge tone={TYPE_TONE[product.type]}>{product.type}</Badge>
+                      {product.isActive ? null : <Badge tone="neutral">Retired</Badge>}
+                    </div>
+                  </div>
+
+                  <p className="mt-4 flex items-baseline gap-1.5">
+                    <span className="text-2xl font-semibold tabular-nums tracking-tight text-ink">
+                      {formatMoney(product.salesPrice)}
+                    </span>
+                    <span className="text-sm text-slate-500">/ unit</span>
+                  </p>
+
+                  {/* Cost price is internal margin data, so customers never see it. */}
+                  {isAdmin ? (
+                    <p className="mt-1 text-xs tabular-nums text-slate-500">
+                      Cost {formatMoney(product.costPrice)} · margin{' '}
+                      {formatMoney(product.salesPrice - product.costPrice)}
+                    </p>
+                  ) : null}
+
+                  {product.notes ? (
+                    <p className="mt-3 line-clamp-2 text-sm leading-snug text-slate-600">
+                      {product.notes}
+                    </p>
+                  ) : null}
+
+                  <div className="mt-4 border-t border-slate-100 pt-3">
+                    <p className="text-xs font-medium text-slate-500">
+                      {product.variants.length === 0
+                        ? 'No variants'
+                        : `Variants (${product.variants.length})`}
+                    </p>
+                    {product.variants.length > 0 ? (
+                      <ul className="mt-2 space-y-1.5">
+                        {product.variants.map((variant) => (
+                          <li
+                            key={variant.id}
+                            className="flex items-baseline justify-between gap-3 text-xs"
+                          >
+                            <span className="min-w-0 truncate">
+                              <span className="font-medium text-ink">
+                                {variant.attributeName}: {variant.attributeValue}
+                              </span>
+                              {variant.priceExtra > 0 ? (
+                                <span className="ml-1.5 text-teal-700">
+                                  +{formatMoney(variant.priceExtra)}
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-slate-500">
+                              {formatMoney(variant.price)}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+
+                  {isAdmin ? (
+                    <div className="mt-auto flex items-center justify-end gap-1 border-t border-slate-100 pt-4">
+                      <IconButton
+                        label={`Add a variant to ${product.name}`}
+                        onClick={() => setVariantProduct(product)}
+                        disabled={busyId === product.id}
+                      >
+                        <Plus className="h-4 w-4" aria-hidden="true" />
+                      </IconButton>
+                      <IconButton
+                        label={`Edit ${product.name}`}
+                        onClick={() => setProductModal({ open: true, product })}
+                        disabled={busyId === product.id}
+                      >
+                        <Pencil className="h-4 w-4" aria-hidden="true" />
+                      </IconButton>
+                      {product.isActive ? (
+                        <IconButton
+                          label={`Retire ${product.name}`}
+                          tone="danger"
+                          onClick={() => retireProduct(product)}
+                          disabled={busyId === product.id}
+                        >
+                          <Archive className="h-4 w-4" aria-hidden="true" />
+                        </IconButton>
+                      ) : (
+                        <IconButton
+                          label={`Restore ${product.name}`}
+                          onClick={() => restoreProduct(product)}
+                          disabled={busyId === product.id}
+                        >
+                          <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                        </IconButton>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </div>
 
       <ProductFormModal

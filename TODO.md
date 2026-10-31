@@ -282,6 +282,11 @@
   - [x] Complete all sections of `DEFENSE_LOG.md` for all 6 milestones.
   - [x] Run final production build test (`npm run build`).
   - [x] Git commit and push to `origin main` before 04:30 PM.
+- [x] **6.6 Post-Audit Remediation & Catalogue UI (2026-10-31):**
+  - [x] Apply every actionable item from `AUDIT_REPORT.md` §4 (seed scripts now run `db:init`, React Router v7 future flags, `CUSTOMER` login redirect; payment-payload and `chk_invoice_dates` notes documented).
+  - [x] Rebuild `/products` as one card per product with a type-coloured rail; cost price and margin are admin-only.
+  - [x] Add a derived "What this plan includes" list to every `/plans` card (charge, annualised value, ordering window, self-service rights, close rule).
+  - [x] Verify both screens with Playwright: zero console warnings or errors.
 
 ---
 

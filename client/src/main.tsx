@@ -13,7 +13,8 @@ if (!container) {
 
 createRoot(container).render(
   <StrictMode>
-    <BrowserRouter>
+    {/* v7 future flags keep the console free of removal warnings on v6.26. */}
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
         <App />
       </AuthProvider>

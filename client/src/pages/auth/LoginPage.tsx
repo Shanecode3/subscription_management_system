@@ -33,8 +33,12 @@ export function LoginPage() {
 
     setIsSubmitting(true);
     try {
-      await login(email.trim(), password);
-      navigate(redirectTo, { replace: true });
+      const signedInUser = await login(email.trim(), password);
+
+      // A customer has no business on the internal dashboard, so send them
+      // straight to the portal rather than to a redirected-then-bounced route.
+      const target = signedInUser.role === 'CUSTOMER' ? '/portal' : redirectTo;
+      navigate(target, { replace: true });
     } catch (error) {
       if (error instanceof ApiError) {
         setFormError(error.message);
