@@ -33,6 +33,7 @@ visual_verify*.py
 # Local agent instructions and working notes — kept on disk, not shipped
 CLAUDE.md
 .claude/
+DEMO_VIDEO_SCRIPT.md
 
 # TypeScript incremental build info and coverage output
 *.tsbuildinfo
