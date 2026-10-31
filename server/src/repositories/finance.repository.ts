@@ -207,28 +207,43 @@ export async function mrrByInterval(filter: FinanceFilter): Promise<IntervalSlic
 }
 
 /**
- * Six months of cash, bucketed by month inside PostgreSQL. `generate_series`
- * supplies the months so a quiet month is a real zero instead of a missing
- * column, and the two facts come from their own ledgers: billing from invoices
- * by issue date, cash from payments by payment date. Cancelled invoices are
- * excluded because they were never money anyone owed.
+ * Cash by month, bucketed inside PostgreSQL. `generate_series` supplies the
+ * months so a quiet month is a real zero instead of a missing column, and the
+ * two facts come from their own ledgers: billing from invoices by issue date,
+ * cash from payments by payment date. Cancelled invoices are excluded because
+ * they were never money anyone owed.
+ *
+ * The window follows the selected date filter so the chart and the KPI cards
+ * above it describe the same period: with no range it stays the six months
+ * ending today, with a range it covers that range's months (clamped to 24 so a
+ * decade-wide filter still renders a readable chart).
  */
 export async function monthlyRevenueSeries(
   filter: FinanceFilter,
-  months = 6,
 ): Promise<MonthlyRevenueRow[]> {
-  const values: unknown[] = [months];
+  const values: unknown[] = [filter.startDate ?? null, filter.endDate ?? null];
   const scope = subscriptionScope(filter, values);
   const invoicedWindow = invoiceDateWindow(filter, values, 'i');
   const collectedWindow = paymentDateWindow(filter, values, 'p');
 
   const result = await query<MonthlyRevenueRow>(
-    `WITH months AS (
-       SELECT generate_series(
-                date_trunc('month', CURRENT_DATE) - ($1::int - 1) * interval '1 month',
-                date_trunc('month', CURRENT_DATE),
-                interval '1 month'
-              )::date AS month_start
+    `WITH bounds AS (
+       SELECT LEAST(
+                date_trunc('month', COALESCE($2::date, CURRENT_DATE))::date,
+                date_trunc('month', CURRENT_DATE)::date
+              ) AS last_month
+     ),
+     span AS (
+       SELECT last_month,
+              GREATEST(
+                date_trunc('month', COALESCE($1::date, last_month - interval '5 months'))::date,
+                (last_month - interval '23 months')::date
+              ) AS first_month
+         FROM bounds
+     ),
+     months AS (
+       SELECT generate_series(first_month, last_month, interval '1 month')::date AS month_start
+         FROM span
      ),
      invoiced AS (
        SELECT date_trunc('month', i.issue_date)::date AS month_start,

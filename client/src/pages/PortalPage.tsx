@@ -327,7 +327,9 @@ export function PortalPage() {
                     <div className="flex flex-wrap gap-2">
                       {lifecycleMoves.length === 0 ? (
                         <p className="max-w-md text-xs leading-relaxed text-slate-500">
-                          {STATUS_EXPLANATION[subscription.status]}
+                          {subscription.status === 'Closed'
+                            ? 'This contract has ended and cannot be renewed on its terms. Contact your account manager to start a new subscription.'
+                            : STATUS_EXPLANATION[subscription.status]}
                         </p>
                       ) : (
                         lifecycleMoves.map((action) => (

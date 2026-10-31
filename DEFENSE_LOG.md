@@ -1750,3 +1750,53 @@ Alongside the audit, the two fabricated dashboard charts were replaced. `monthly
 1. *Why does the demo data go through the billing engine instead of being inserted as finished rows?* — Because a fixture that bypasses the engine can produce combinations the application itself forbids, and the demo would then show a system that appears consistent only because the data was written by hand. Running `runBillingDay()` and `recordPayment()` means the seeded invoices have real cycle keys, tax snapshots and payment reconciliations, so a second Billing Day run proves idempotency on data the same evaluator can inspect.
 
 2. *What stops the same contract from being billed twice for one period?* — `invoices.billing_cycle_key` is `UNIQUE` and is written as `sub_<id>_<cycle date>`; the billing engine claims it inside the same transaction that inserts the invoice, so a repeated run — or two staff pressing the button at once — inserts nothing for a period that already has an invoice and reports the contract as skipped.
+
+---
+
+## 63. Second audit pass — renewal cycles, cost visibility and dead ends
+
+**File & component.** `server/src/repositories/subscription.repository.ts` (`renewSubscription`), `server/src/services/product.service.ts` (`toProductDto`, `loadProductsWithVariants`, `removeVariant`) and `server/src/repositories/product.repository.ts` (`deleteVariant`, `countVariantReferences`), `server/src/services/plan.service.ts` + `plan.repository.ts` (`countLiveSubscriptions`), `server/src/repositories/invoice.repository.ts` (`listOverdueInvoices`), `server/src/routes/auth.routes.ts` (forgot-password), `server/src/utils/billing.validators.ts` (discount update), `client/src/pages/InvoicesPage.tsx`, `client/src/pages/InvoiceDetailView.tsx`, `client/src/pages/PortalPage.tsx`.
+
+**How it works.** A second pass over every lifecycle — auth, catalogue, subscriptions, billing, invoices, payments, discounts, portal and dashboard — produced 43 candidate defects, of which 28 survived an adversarial re-read. The ones below were fixed; each was re-tested against the running API afterwards.
+
+**Why this design.**
+
+- **Renewal could silently stop billing.** A contract billed for a cycle and closed the same day was renewed onto that same date, but `billing_cycle_key` is `UNIQUE(subscription_id, cycle date)`, so every later run skipped the renewed contract as a duplicate and it was never invoiced again. Renewal now checks for an invoice on the target date and moves the first cycle of the new term to the following day, which keeps the uniqueness rule that powers idempotency intact rather than weakening it.
+- **Customers received cost prices.** The catalogue screens hide margin data behind an `isAdmin` check, but `GET /products` returned `costPrice` to every role. The DTO now takes an `includeCost` flag that is false for CUSTOMER sessions, so the hiding happens on the server and the UI check is only presentation.
+- **Deleting a variant orphaned documents.** `removeVariant` hard-deleted the row while `subscription_lines`, `invoice_lines` and `quotation_template_lines` are `ON DELETE SET NULL`, so an issued invoice lost the variant it described. The service now counts references inside the same transaction (with the client passed to the delete, which previously ran on a separate pooled connection) and refuses with a 409 that points at retiring the product instead.
+- **A plan's interval could be edited under live contracts.** Subscriptions store no interval of their own, so changing the plan retimed every active one. The edit now returns 409 while a live contract exists.
+- **The reset link was handed to any caller in development.** The raw token is now returned only when the request arrives from this machine and the build is not production; every other caller gets the same neutral message. That keeps the no-mailer demo working from localhost without publishing tokens to the network.
+- **Dead links for customers.** The Invoices page offered a "Billing day" link and the invoice detail offered "Print", both of which land on staff-only screens. Both are now hidden for CUSTOMER sessions, and the portal no longer tells a customer to renew a contract whose plan forbids renewal.
+- Smaller: `GET /invoices/overdue` required a balance so a fully paid invoice cannot be listed as late, and a discount `PATCH` with `discountValue: 0` is rejected by the schema instead of reaching a raw CHECK constraint.
+
+**Verification performed.** `GET /products` as a customer returns `costPrice: 0` while Admin still receives 420; `PATCH /plans/1 {billingInterval:'weekly'}` returns 409 naming the 2 live contracts; `POST /auth/forgot-password` from localhost still returns the reset URL; `GET /invoices/overdue` returns the single genuinely unpaid invoice. In the browser, a customer session shows **0** billing-day links, the portal renders one Renew button (the closed contract whose plan allows it), and the console stays clean. `tsc --noEmit` and both production builds pass.
+
+**Known and deliberately not changed.** Existing JWTs are not revoked when a password is reset (the app has no session table; adding one is a schema change beyond the remaining window); the billing preview ranks discounts from one snapshot per run, so a rule exhausted mid-run can be shown but not granted; invoice lines read the discount's current code rather than a snapshot; and a template's `validity_days` is stored but not enforced when a quotation is accepted. Each is recorded here rather than left as a surprise.
+
+**Likely Evaluator Q&A**
+
+1. *Why block a plan's interval change instead of migrating the contracts?* — Because an interval is part of what the customer agreed to; silently moving a monthly contract to weekly would change the amount and the due dates of invoices already promised. Refusing the edit keeps existing terms, and a new plan carries the new cadence for new sign-ups.
+2. *Why is the reset token still returned at all?* — There is no mail server in a local demo, so the only way to show the forgot-password flow end to end is to hand the link to the person sitting at the machine. The token is returned only to a loopback caller in a non-production build and never for an address that does not exist, so the exposure cannot be reached from the network.
+
+---
+
+## 64. Finance honesty pass — filtered chart window, live-only forecast and valid demo terms
+
+**File & component.** `server/src/repositories/finance.repository.ts` (`monthlyRevenueSeries`), `client/src/components/finance/RevenueForecaster.tsx`, `client/src/pages/FinanceDashboardView.tsx` ("Still owed" caption), `server/src/db/seed_performance.ts` (payment terms).
+
+**How it works.** A third review pass over the finance screens found three places where a number was right in code but wrong or invented on screen, plus one seed defect:
+
+- **The monthly chart ignored the date filter.** The `months` CTE was hard-wired to the six calendar months ending `CURRENT_DATE`, while the KPI cards above it respected the selected range — so choosing February–March plotted April–September at zero and contradicted the collected figure on the same screen. The window is now derived from the filter: no range keeps six months ending today, a range plots exactly that range's months, a start-only or end-only filter anchors the missing side to today, and the span is clamped to 24 buckets so a decade-wide filter still renders. `generate_series` still supplies every month, so a quiet month remains a real zero.
+- **The what-if forecaster invented a baseline.** With no active revenue it projected from a hardcoded `$10,000` MRR and five contracts, so a fresh or empty-filtered selection showed a confident forecast built from numbers that do not exist. Both now come only from the live aggregate, and when that aggregate is zero the panel says so instead of pretending.
+- **The annual-upsell slider applied a hidden 0.05 multiplier**, so "20%" moved the model by about one percent. It now moves projected *cash* by the advertised share — annual plans prepay a year, which is a cash effect, not an MRR one — and the slider says exactly that.
+- **"Still owed" was mislabelled under a date filter** and is now captioned as the unpaid balance on invoices issued inside the selected range.
+- **The performance seed assigned "Net 7"**, a term the contract screen and due-date map do not know, so those invoices displayed "Net 7" but fell due on the issue date. The generator now picks only from the supported set (`Immediate Payment`, `Net 15`, `Net 30`, `Net 45`).
+
+**Why this design.** A dashboard is only useful if every figure on it describes the same population. Deriving the chart window from the same filter the KPIs use means the two cannot disagree; sourcing the forecaster from the live aggregate means the "what-if" sheet is a model of this business, not of a placeholder one; and restricting the seed to terms the validator accepts keeps generated data inside the same rules a user must follow.
+
+**Verification performed.** With no filter the endpoint returns 2026-05…2026-10; `startDate=2026-08-01&endDate=2026-09-30` returns exactly those two months with their real invoiced and collected figures; `startDate=2026-01-01` runs January to today; `endDate=2026-03-31` runs six months back to March. `tsc --noEmit` and both production builds pass.
+
+**Likely Evaluator Q&A**
+
+1. *Why clamp the chart to 24 months instead of plotting the full range?* — Twenty-four buckets is the widest span that still reads as a bar chart at laptop width; beyond that the plot becomes unreadable even though the totals would be correct. The KPI cards still report the full selected range, so no money is hidden — only the shape is shortened.
+2. *Why does annual billing raise cash instead of MRR?* — MRR is the monthly run-rate of the same contracts; moving a contract to annual billing changes when the money arrives, not how much is recognised per month. Counting it as MRR growth would double-count the same revenue as both a monthly and an annual figure.

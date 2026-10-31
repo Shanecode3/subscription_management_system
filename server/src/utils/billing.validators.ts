@@ -163,7 +163,9 @@ export const updateDiscountRuleSchema = z
         errorMap: () => ({ message: 'Discount type must be percentage or fixed.' }),
       })
       .optional(),
-    discountValue: moneyField('Discount value').optional(),
+    discountValue: moneyField('Discount value')
+      .refine((value) => value > 0, 'Discount value must be greater than zero.')
+      .optional(),
     scope: z
       .enum(DISCOUNT_SCOPES, {
         errorMap: () => ({

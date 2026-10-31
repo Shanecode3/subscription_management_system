@@ -63,14 +63,23 @@ function toVariantDto(row: VariantRow, baseSalesPrice: number): ProductVariantDt
   };
 }
 
-export function toProductDto(product: ProductRow, variants: VariantRow[]): ProductDto {
+/**
+ * Cost price is internal margin data. The catalogue screens already hide it
+ * from customers, so the API must not hand it out either: a customer receives
+ * zero rather than the company's buying price.
+ */
+export function toProductDto(
+  product: ProductRow,
+  variants: VariantRow[],
+  includeCost = true,
+): ProductDto {
   const salesPrice = toAmount(product.sales_price);
   return {
     id: product.id,
     name: product.name,
     type: product.type,
     salesPrice,
-    costPrice: toAmount(product.cost_price),
+    costPrice: includeCost ? toAmount(product.cost_price) : 0,
     notes: product.notes,
     isActive: product.is_active,
     variants: variants.map((variant) => toVariantDto(variant, salesPrice)),
@@ -80,7 +89,10 @@ export function toProductDto(product: ProductRow, variants: VariantRow[]): Produ
 }
 
 /** Batch-loads variants for the given products so a list needs two queries, not N+1. */
-export async function loadProductsWithVariants(products: ProductRow[]): Promise<ProductDto[]> {
+export async function loadProductsWithVariants(
+  products: ProductRow[],
+  includeCost = true,
+): Promise<ProductDto[]> {
   const variants = await productRepository.listVariantsForProducts(products.map((p) => p.id));
 
   const byProduct = new Map<number, VariantRow[]>();
@@ -90,12 +102,14 @@ export async function loadProductsWithVariants(products: ProductRow[]): Promise<
     else byProduct.set(variant.product_id, [variant]);
   }
 
-  return products.map((product) => toProductDto(product, byProduct.get(product.id) ?? []));
+  return products.map((product) =>
+    toProductDto(product, byProduct.get(product.id) ?? [], includeCost),
+  );
 }
 
 export async function listProducts(requester: Requester): Promise<ProductDto[]> {
   const rows = await productRepository.listProducts(requester.role === 'CUSTOMER');
-  return loadProductsWithVariants(rows);
+  return loadProductsWithVariants(rows, requester.role !== 'CUSTOMER');
 }
 
 export async function getProduct(id: number, requester: Requester): Promise<ProductDto> {
@@ -103,7 +117,7 @@ export async function getProduct(id: number, requester: Requester): Promise<Prod
   if (!product || (requester.role === 'CUSTOMER' && !product.is_active)) {
     throw new NotFoundError('That product does not exist.');
   }
-  const [dto] = await loadProductsWithVariants([product]);
+  const [dto] = await loadProductsWithVariants([product], requester.role !== 'CUSTOMER');
   return dto!;
 }
 
@@ -307,7 +321,15 @@ export async function removeVariant(
   }
 
   await withTransaction(async (client) => {
-    await productRepository.deleteVariant(variantId);
+    const refs = await productRepository.countVariantReferences(variantId, client);
+    if (refs.templates + refs.subscriptions + refs.invoices > 0) {
+      throw new ConflictError(
+        'That variant is used by an existing quotation template, subscription or invoice, so it cannot be deleted. Retire the product instead.',
+        [{ field: 'variantId', message: 'This variant is already referenced by documents.' }],
+      );
+    }
+
+    await productRepository.deleteVariant(variantId, client);
     await recordAuditEvent(
       {
         entityType: 'PRODUCT_VARIANT',

@@ -9,6 +9,7 @@ import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SelectField } from '../components/ui/SelectField';
+import { useAuth } from '../lib/auth-context';
 import { exportToCsv } from '../lib/csv-export';
 import { cx } from '../lib/cx';
 import { formatDate, formatMoney } from '../lib/format';
@@ -33,6 +34,9 @@ const VIEW_OPTIONS: readonly { value: LedgerView; label: string }[] = [
  */
 export function InvoicesPage() {
   const { data, isLoading, error, reload } = useApiResource<Invoice[]>('/invoices');
+  const { user } = useAuth();
+  // The billing run is an internal screen; a customer sees no link it cannot follow.
+  const isInternal = user?.role === 'ADMIN' || user?.role === 'STAFF';
 
   const [statusFilter, setStatusFilter] = useState('');
   const [view, setView] = useState<LedgerView>('all');
@@ -137,10 +141,12 @@ export function InvoicesPage() {
                 <Download className="h-4 w-4" aria-hidden="true" />
                 Export CSV ({visible.length})
               </Button>
-              <Link to="/billing" className="btn-teal w-auto">
-                <Play className="h-4 w-4" aria-hidden="true" />
-                Billing day
-              </Link>
+              {isInternal ? (
+                <Link to="/billing" className="btn-teal w-auto">
+                  <Play className="h-4 w-4" aria-hidden="true" />
+                  Billing day
+                </Link>
+              ) : null}
             </div>
           }
         />
@@ -289,10 +295,12 @@ export function InvoicesPage() {
                     title="No invoices yet"
                     description="Run billing day and one draft invoice appears here for every contract whose billing date has arrived."
                     action={
-                      <Link to="/billing" className="btn-teal w-auto">
-                        <Play className="h-4 w-4" aria-hidden="true" />
-                        Go to billing day
-                      </Link>
+                      isInternal ? (
+                        <Link to="/billing" className="btn-teal w-auto">
+                          <Play className="h-4 w-4" aria-hidden="true" />
+                          Go to billing day
+                        </Link>
+                      ) : undefined
                     }
                   />
                 </div>

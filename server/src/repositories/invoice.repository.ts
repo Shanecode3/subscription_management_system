@@ -198,7 +198,12 @@ export async function listOverdueInvoices(
   limit = 100,
 ): Promise<InvoiceRow[]> {
   const values: unknown[] = [];
-  const conditions = [`i.status = 'Confirmed'`, `i.due_date < CURRENT_DATE`];
+  const conditions = [
+    `i.status = 'Confirmed'`,
+    `i.due_date < CURRENT_DATE`,
+    // A fully paid invoice is not in arrears, whatever its due date says.
+    `i.total_amount > i.amount_paid`,
+  ];
 
   if (customerId !== undefined) {
     values.push(customerId);

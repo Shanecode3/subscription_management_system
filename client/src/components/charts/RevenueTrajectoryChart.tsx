@@ -26,7 +26,7 @@ function niceStep(value: number): number {
 }
 
 /**
- * SVG line-and-area chart for the six monthly buckets the finance endpoint
+ * SVG line-and-area chart for the monthly buckets the finance endpoint
  * aggregates in PostgreSQL. It plots exactly the rows it is handed — no point
  * on this chart is computed, smoothed or projected in the browser.
  */

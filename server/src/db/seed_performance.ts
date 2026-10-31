@@ -299,7 +299,9 @@ function buildSubscriptions(
       startDate,
       expiryDate,
       nextBillingDate,
-      paymentTerms: pick(['Immediate Payment', 'Net 7', 'Net 15', 'Net 30']),
+      // Only terms the contract screen and due-date map understand — an
+      // unknown term silently fell back to "due today".
+      paymentTerms: pick(['Immediate Payment', 'Net 15', 'Net 30', 'Net 45']),
       periodAmount,
       lines,
     });

@@ -131,6 +131,19 @@ export async function updatePlan(
     }
   }
 
+  // A contract keeps no copy of the interval it was sold on, so changing the
+  // plan would silently retime every live subscription and the next billing
+  // date it holds. Live contracts finish on their terms; new ones get the edit.
+  if (input.billingInterval !== undefined && input.billingInterval !== existing.billing_interval) {
+    const live = await planRepository.countLiveSubscriptions(id);
+    if (live > 0) {
+      throw new ConflictError(
+        `${live} live subscription${live === 1 ? '' : 's'} bill on this plan's current interval. Retire the plan and create a new one instead of changing its interval.`,
+        [{ field: 'billingInterval', message: 'This plan still has live subscriptions.' }],
+      );
+    }
+  }
+
   // A partial update can still create an impossible window, so compare the
   // merged result rather than only the fields that arrived.
   const nextFrom = input.availableFrom ?? existing.available_from;

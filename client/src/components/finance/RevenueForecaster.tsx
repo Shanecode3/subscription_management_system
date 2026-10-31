@@ -19,14 +19,22 @@ export function RevenueForecaster({ currentMrr, currentActiveCount }: RevenueFor
     setCollectionRate(95);
   };
 
-  // Forecast computations
-  const baseMrr = currentMrr > 0 ? currentMrr : 10000;
-  const projectedMrr = Math.round(baseMrr * (1 + growthRate / 100) * (1 + (annualShift * 0.05) / 100));
+  // Every figure starts from the live MRR and active-contract count the
+  // dashboard aggregated from SQL. There is no substitute baseline: with no
+  // recurring revenue the model projects zero rather than inventing one.
+  const baseMrr = currentMrr;
+  const projectedMrr = Math.round(baseMrr * (1 + growthRate / 100));
   const projectedArr = projectedMrr * 12;
   const mrrDelta = projectedMrr - baseMrr;
 
-  const projectedCashCollectedYear = Math.round(projectedArr * (collectionRate / 100));
-  const projectedActiveContracts = Math.round((currentActiveCount || 5) * (1 + growthRate / 100));
+  // Contracts moved to annual billing pay a year up front, so the shifted
+  // share of the run-rate lands inside the next twelve months on top of the
+  // monthly cash it would otherwise have collected.
+  const projectedCashCollectedYear = Math.round(
+    projectedArr * (collectionRate / 100) * (1 + annualShift / 100),
+  );
+  const projectedActiveContracts = Math.round(currentActiveCount * (1 + growthRate / 100));
+  const hasBaseline = baseMrr > 0 || currentActiveCount > 0;
 
   // 6-month projected trajectory bars
   const months = ['Month 1', 'Month 2', 'Month 3', 'Month 4', 'Month 5', 'Month 6'];
@@ -108,6 +116,9 @@ export function RevenueForecaster({ currentMrr, currentActiveCount }: RevenueFor
               onChange={(e) => setAnnualShift(Number(e.target.value))}
               className="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-slate-200 accent-teal-600"
             />
+            <p className="mt-1 text-[10px] text-slate-500">
+              Annual plans pay a year up front, so this lifts projected cash — not MRR.
+            </p>
             <div className="flex justify-between text-[10px] text-slate-400 mt-0.5">
               <span>0% (Monthly-only)</span>
               <span>25%</span>
@@ -142,6 +153,12 @@ export function RevenueForecaster({ currentMrr, currentActiveCount }: RevenueFor
 
         {/* Projected Metrics & Visual Trajectory */}
         <div className="lg:col-span-7 flex flex-col justify-between space-y-4">
+          {hasBaseline ? null : (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              There is no active recurring revenue in this selection yet, so the model projects
+              from zero. Every figure below is your own live total, not a stand-in.
+            </p>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <div className="rounded-xl border border-slate-100 bg-white p-3 shadow-xs">
               <p className="text-[11px] font-medium text-slate-500">Projected MRR</p>

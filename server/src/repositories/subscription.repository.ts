@@ -333,6 +333,12 @@ export async function updateAddonLine(
 /**
  * Reopens a closed contract. The new expiry is derived from the plan interval
  * in SQL so month and year lengths are PostgreSQL's problem, not ours.
+ *
+ * A renewal can land on a date that already carries an invoice — the contract
+ * was billed for that cycle this morning and closed the same day, for example.
+ * `invoices.billing_cycle_key` is unique per subscription and cycle date, so
+ * reusing that date would make every later billing run skip the contract as a
+ * duplicate. The first cycle of the new term moves to the following day instead.
  */
 export async function renewSubscription(
   id: number,
@@ -347,7 +353,15 @@ export async function renewSubscription(
         SET status = 'Active',
             start_date = COALESCE($2::date, CURRENT_DATE),
             expiry_date = COALESCE($3::date, COALESCE($2::date, CURRENT_DATE) + $4::interval),
-            next_billing_date = COALESCE($2::date, CURRENT_DATE),
+            next_billing_date = CASE
+                WHEN EXISTS (
+                  SELECT 1 FROM invoices i
+                   WHERE i.subscription_id = $1
+                     AND i.billing_cycle_date = COALESCE($2::date, CURRENT_DATE)
+                )
+                THEN COALESCE($2::date, CURRENT_DATE) + 1
+                ELSE COALESCE($2::date, CURRENT_DATE)
+              END,
             payment_terms = COALESCE($5, payment_terms),
             paused_at = NULL,
             closed_at = NULL

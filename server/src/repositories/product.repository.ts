@@ -194,7 +194,28 @@ export async function insertVariant(
   return row;
 }
 
-export async function deleteVariant(id: number): Promise<boolean> {
-  const result = await query(`DELETE FROM product_variants WHERE id = $1`, [id]);
+export async function deleteVariant(id: number, client?: PoolClient): Promise<boolean> {
+  const sql = `DELETE FROM product_variants WHERE id = $1`;
+  const result = client ? await client.query(sql, [id]) : await query(sql, [id]);
   return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * A variant can be referenced by templates, live contracts and issued
+ * invoices. Those columns are `ON DELETE SET NULL`, so a hard delete would
+ * silently strip the variant from documents that already described it.
+ */
+export async function countVariantReferences(
+  id: number,
+  client?: PoolClient,
+): Promise<{ templates: number; subscriptions: number; invoices: number }> {
+  const sql = `
+    SELECT
+      (SELECT COUNT(*)::int FROM quotation_template_lines WHERE variant_id = $1) AS templates,
+      (SELECT COUNT(*)::int FROM subscription_lines WHERE variant_id = $1)       AS subscriptions,
+      (SELECT COUNT(*)::int FROM invoice_lines WHERE variant_id = $1)            AS invoices`;
+  const result = client
+    ? await client.query<{ templates: number; subscriptions: number; invoices: number }>(sql, [id])
+    : await query<{ templates: number; subscriptions: number; invoices: number }>(sql, [id]);
+  return result.rows[0]!;
 }

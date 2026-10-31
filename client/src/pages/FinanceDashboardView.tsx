@@ -96,7 +96,7 @@ export function FinanceDashboardView() {
 
   const dashboard = data;
 
-  // Six monthly buckets aggregated in SQL, plotted exactly as they arrive.
+  // Monthly buckets aggregated in SQL over the selected window, plotted as they arrive.
   const trajectoryData = useMemo<TrajectoryDataPoint[]>(() => {
     if (!dashboard) return [];
     return dashboard.revenueByMonth.map((point) => ({
@@ -424,7 +424,9 @@ export function FinanceDashboardView() {
                   </Badge>
                 </div>
                 <p className="mt-3 text-xs leading-relaxed text-slate-500">
-                  Balance across every confirmed invoice, whether or not it has fallen due yet.
+                  {applied.startDate || applied.endDate
+                    ? 'Unpaid balance on confirmed invoices issued inside the selected date range.'
+                    : 'Balance across every confirmed invoice, whether or not it has fallen due yet.'}
                 </p>
 
                 <div className="mt-4 border-t border-slate-100 pt-3">

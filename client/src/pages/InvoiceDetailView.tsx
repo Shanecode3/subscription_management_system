@@ -146,7 +146,9 @@ export function InvoiceDetailView() {
                     </Button>
                   ) : null}
                   {invoice.allowedActions.map((action) => {
-                    if (action !== 'print' && !isInternal) return null;
+                    // Printing runs through the staff-only print screen, so a
+                    // customer is not offered a button that cannot open.
+                    if (!isInternal) return null;
                     const Icon = ACTION_ICON[action];
                     if (action === 'print') {
                       return (

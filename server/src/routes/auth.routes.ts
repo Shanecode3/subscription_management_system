@@ -39,10 +39,14 @@ authRouter.post(
     const message =
       'If that email address belongs to an account, a password reset link has been generated and will expire in 1 hour.';
 
-    // The raw token is returned only in development so the flow can be tested
-    // without a mail server. Production responses never reveal whether the
-    // address exists.
-    if (!reset || isProduction) {
+    // The raw token is returned only to a browser running on the same machine,
+    // in development, so the flow can be demonstrated without a mail server.
+    // A request from anywhere else — or any production build — gets the same
+    // answer whether or not the address exists.
+    const caller = req.ip ?? '';
+    const fromThisMachine =
+      caller === '127.0.0.1' || caller === '::1' || caller === '::ffff:127.0.0.1';
+    if (!reset || isProduction || !fromThisMachine) {
       return sendSuccess(res, {}, 200, message);
     }
 

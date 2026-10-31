@@ -102,6 +102,19 @@ export async function findPlanByName(name: string): Promise<PlanRow | null> {
   return result.rows[0] ?? null;
 }
 
+/**
+ * Contracts that would be retimed by editing the plan's billing interval.
+ */
+export async function countLiveSubscriptions(planId: number): Promise<number> {
+  const result = await query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count
+       FROM subscriptions
+      WHERE plan_id = $1 AND status IN ('Active', 'Paused')`,
+    [planId],
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}
+
 export async function insertPlan(input: NewPlanInput, client?: PoolClient): Promise<PlanRow> {
   const sql = `
     INSERT INTO subscription_plans (
