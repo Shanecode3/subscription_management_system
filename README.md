@@ -88,12 +88,12 @@ These are local seed accounts for evaluation only.
 | `npm run typecheck` | Type-check only |
 | `npm run db:create` | Create `brightloop_db` if it does not exist |
 | `npm run db:init` | Apply `src/db/schema.sql` (idempotent) |
-| `npm run db:seed` | Seed the three demo accounts, the catalogue (products + variants), the plans and the quotation templates |
+| `npm run db:seed` | Seed the three demo accounts, the catalogue (products + variants), the plans, the quotation templates and, when none exist yet, two demo subscriptions |
 | `npm run db:setup` | All three of the above, in order |
 
 ---
 
-## API surface (Milestones 1–2)
+## API surface (Milestones 1–3)
 
 Base path: `/api/v1`
 
@@ -122,6 +122,17 @@ Base path: `/api/v1`
 | `GET` | `/quotation-templates` | Admin, Staff |
 | `GET` | `/quotation-templates/:id` | Admin, Staff |
 | `POST` | `/quotation-templates` | **Admin only** |
+| `GET` | `/subscriptions` | Admin, Staff — filter by `status`, `customerId` |
+| `GET` | `/subscriptions/:id` | Admin, Staff |
+| `POST` | `/subscriptions` | Admin, Staff — from a `templateId`, or `planId` + `lines` |
+| `PUT` | `/subscriptions/:id/status` | Admin, Staff — enforced transitions and plan flags |
+| `GET` | `/portal/subscriptions` | **Customer only** — filtered to their own contracts |
+| `GET` | `/portal/subscriptions/:id` | **Customer only** — 404 for another customer's id |
+| `PATCH` | `/portal/subscriptions/:id/addons` | **Customer only** — `{ lineId, isActive }` |
+| `POST` | `/portal/subscriptions/:id/pause` | **Customer only** — needs `allow_pause` |
+| `POST` | `/portal/subscriptions/:id/resume` | **Customer only** |
+| `POST` | `/portal/subscriptions/:id/early-close` | **Customer only** — needs `allow_early_close` |
+| `POST` | `/portal/subscriptions/:id/renew` | **Customer only** — needs `allow_renew` |
 
 Responses use one envelope everywhere:
 
@@ -138,15 +149,15 @@ Responses use one envelope everywhere:
 server/src/
   config/      environment parsing (fails fast on missing values)
   db/          schema.sql, pool, create/init/seed scripts
-  repositories/  SQL only (products, plans, quotation templates, users, audit)
+  repositories/  SQL only (products, plans, quotation templates, subscriptions, users, audit)
   services/      business rules only
   middleware/    auth, validation, errors, request logging
   routes/        HTTP surface only
-  utils/         errors, validators (auth + catalog), JWT, logger, response, money, params
+  utils/         errors, validators (auth + catalog + subscriptions), JWT, logger, response, money, params
 client/src/
-  lib/           api client, auth context, types, formatting, navigation, hooks
-  components/    ui primitives, layout, catalog forms
-  pages/         auth screens, dashboard, products, plans, templates
+  lib/           api client, auth context, types, formatting, navigation, subscription status, hooks
+  components/    ui primitives, layout, catalog forms, subscription stepper and creation modal
+  pages/         auth screens, dashboard, products, plans, templates, subscriptions, portal
 ```
 
 Dependency direction is one way: `routes → services → repositories → db`. Services never build SQL, repositories never decide permissions, and routes never contain business rules.

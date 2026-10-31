@@ -4,7 +4,10 @@ import { RoleRoute } from './components/layout/RoleRoute';
 import { DashboardPage } from './pages/DashboardPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { PlansPage } from './pages/PlansPage';
+import { PortalPage } from './pages/PortalPage';
 import { ProductsPage } from './pages/ProductsPage';
+import { SubscriptionDetailPage } from './pages/SubscriptionDetailPage';
+import { SubscriptionsPage } from './pages/SubscriptionsPage';
 import { TemplatesPage } from './pages/TemplatesPage';
 import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage';
 import { LoginPage } from './pages/auth/LoginPage';
@@ -80,6 +83,39 @@ export default function App() {
           <ProtectedRoute>
             <RoleRoute roles={['ADMIN', 'STAFF']}>
               <TemplatesPage />
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/subscriptions"
+        element={
+          <ProtectedRoute>
+            <RoleRoute roles={['ADMIN', 'STAFF']}>
+              <SubscriptionsPage />
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/subscriptions/:id"
+        element={
+          <ProtectedRoute>
+            <RoleRoute roles={['ADMIN', 'STAFF']}>
+              <SubscriptionDetailPage />
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/portal"
+        element={
+          <ProtectedRoute>
+            <RoleRoute roles={['CUSTOMER']}>
+              <PortalPage />
             </RoleRoute>
           </ProtectedRoute>
         }

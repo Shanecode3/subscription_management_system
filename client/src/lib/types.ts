@@ -105,3 +105,77 @@ export interface QuotationTemplate {
   createdAt: string;
   updatedAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// Subscriptions and the customer portal (Milestone 3)
+// ---------------------------------------------------------------------------
+
+export type SubscriptionStatus =
+  | 'Draft'
+  | 'Quotation'
+  | 'Confirmed'
+  | 'Active'
+  | 'Paused'
+  | 'Closed';
+
+export type PaymentTerms =
+  | 'Immediate Payment'
+  | 'Net 15'
+  | 'Net 30'
+  | 'Net 45'
+  | 'Net 60';
+
+export interface SubscriptionLine {
+  id: number;
+  productId: number;
+  productName: string;
+  productType: string;
+  variantId: number | null;
+  variantLabel: string | null;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  discountAmount: number;
+  taxAmount: number;
+  subtotal: number;
+  totalAmount: number;
+  isAddon: boolean;
+  isAddonActive: boolean;
+}
+
+export interface SubscriptionFlags {
+  autoClose: boolean;
+  allowEarlyClose: boolean;
+  allowPause: boolean;
+  allowRenew: boolean;
+}
+
+export interface Subscription {
+  id: number;
+  subscriptionNumber: string;
+  customerId: number;
+  customerName: string;
+  customerEmail: string;
+  planId: number;
+  planName: string;
+  planPrice: number;
+  billingInterval: BillingInterval;
+  templateId: number | null;
+  templateName: string | null;
+  status: SubscriptionStatus;
+  startDate: string;
+  expiryDate: string | null;
+  nextBillingDate: string | null;
+  paymentTerms: PaymentTerms;
+  notes: string | null;
+  pausedAt: string | null;
+  closedAt: string | null;
+  flags: SubscriptionFlags;
+  allowedTransitions: SubscriptionStatus[];
+  lines: SubscriptionLine[];
+  subtotal: number;
+  addonTotal: number;
+  total: number;
+  createdAt: string;
+  updatedAt: string;
+}

@@ -130,26 +130,26 @@
 - **AC3.4 (Add-on Toggling & Plan Flags):** Given an active subscription with an add-on line, When customer toggles add-on, Then update `is_addon_active` and recalculate line subtotal. If customer attempts to pause when `allow_pause = FALSE`, reject with HTTP 400.
 
 ### Task Checklist
-- [ ] **3.1 Subscription Engine & Numbering:**
-  - [ ] Implement `server/src/routes/subscription.routes.ts` & `subscription.service.ts`.
-  - [ ] Implement `createFromTemplate` and manual subscription creation using PostgreSQL sequence `seq_subscription_number`.
-  - [ ] Implement subscription lines breakdown (`product_id`, `variant_id`, `unit_price`, `quantity`, `subtotal`, `is_addon`, `is_addon_active`).
-- [ ] **3.2 Lifecycle State Machine:**
-  - [ ] Implement transition logic: `Draft` → `Quotation` → `Confirmed` → `Active` → `Closed` / `Paused`.
-  - [ ] Enforce plan rules: check `allow_pause` before setting `Paused`, check `allow_early_close` before setting `Closed`, check `allow_renew` before renewing.
-- [ ] **3.3 Customer Portal Endpoints:**
-  - [ ] Implement `/api/v1/portal/subscriptions` (enforcing customer tenant filter).
-  - [ ] Implement `/api/v1/portal/subscriptions/:id/addons` (toggle add-on on/off).
-  - [ ] Implement `/api/v1/portal/subscriptions/:id/pause`, `/resume`, `/early-close`, `/renew`.
-- [ ] **3.4 Frontend Subscription Views & Stepper Component:**
-  - [ ] Build `SubscriptionDetailView.tsx` with visual status stepper bar (`Draft → Quotation → Confirmed → Active → Closed`).
-  - [ ] Build staff subscription list with filter by status (`Draft`, `Active`, etc.).
-  - [ ] Build `CustomerPortalView.tsx` showing active plans, interactive Add-on switches, and self-service action buttons (Pause, Early Close, Renew).
-- [ ] **3.5 Verification & Commit:**
-  - [ ] Verify template-to-subscription conversion and state transitions.
-  - [ ] Test customer tenant isolation and add-on toggling.
-  - [ ] Update `DEFENSE_LOG.md` (Milestone 3 entries).
-  - [ ] Git commit and push to `origin main`.
+- [x] **3.1 Subscription Engine & Numbering:**
+  - [x] Implement `server/src/routes/subscription.routes.ts` & `subscription.service.ts`.
+  - [x] Implement `createFromTemplate` and manual subscription creation using PostgreSQL sequence `seq_subscription_number`.
+  - [x] Implement subscription lines breakdown (`product_id`, `variant_id`, `unit_price`, `quantity`, `subtotal`, `is_addon`, `is_addon_active`).
+- [x] **3.2 Lifecycle State Machine:**
+  - [x] Implement transition logic: `Draft` → `Quotation` → `Confirmed` → `Active` → `Closed` / `Paused`.
+  - [x] Enforce plan rules: check `allow_pause` before setting `Paused`, check `allow_early_close` before setting `Closed`, check `allow_renew` before renewing.
+- [x] **3.3 Customer Portal Endpoints:**
+  - [x] Implement `/api/v1/portal/subscriptions` (enforcing customer tenant filter).
+  - [x] Implement `/api/v1/portal/subscriptions/:id/addons` (toggle add-on on/off).
+  - [x] Implement `/api/v1/portal/subscriptions/:id/pause`, `/resume`, `/early-close`, `/renew`.
+- [x] **3.4 Frontend Subscription Views & Stepper Component:**
+  - [x] Build `SubscriptionDetailPage.tsx` with visual status stepper bar (`Draft → Quotation → Confirmed → Active → Closed`).
+  - [x] Build staff subscription list with filter by status (`Draft`, `Active`, etc.).
+  - [x] Build `PortalPage.tsx` showing active plans, interactive Add-on switches, and self-service action buttons (Pause, Early Close, Renew).
+- [x] **3.5 Verification & Commit:**
+  - [x] Verify template-to-subscription conversion and state transitions — 62/62 live assertions, including AC3.1, AC3.2, AC3.3 and AC3.4.
+  - [x] Test customer tenant isolation and add-on toggling.
+  - [x] Update `DEFENSE_LOG.md` (Milestone 3 entries).
+  - [x] Git commit and push to `origin main`.
 
 ---
 

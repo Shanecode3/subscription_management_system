@@ -55,6 +55,18 @@ export function intervalLabel(interval: BillingInterval): string {
 }
 
 /**
+ * Today as 'YYYY-MM-DD' in the user's own calendar, which is the same shape the
+ * API accepts for date fields. Built from local parts rather than toISOString(),
+ * which would roll the date over for anyone east of UTC late in the day.
+ */
+export function todayIso(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+/**
  * Reads a money input as typed by a person. Returns null for blank or
  * non-numeric text so the caller can show a field-level message instead of
  * sending NaN to the API.

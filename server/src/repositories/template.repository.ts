@@ -18,6 +18,7 @@ export interface TemplateLineRow extends QueryResultRow {
   template_id: number;
   product_id: number;
   product_name: string;
+  product_type: string;
   variant_id: number | null;
   variant_attribute_name: string | null;
   variant_attribute_value: string | null;
@@ -73,6 +74,7 @@ export async function listLinesForTemplates(templateIds: number[]): Promise<Temp
 
   const result = await query<TemplateLineRow>(
     `SELECT l.id, l.template_id, l.product_id, p.name AS product_name,
+            p.type AS product_type,
             l.variant_id, v.attribute_name AS variant_attribute_name,
             v.attribute_value AS variant_attribute_value,
             l.quantity, l.unit_price

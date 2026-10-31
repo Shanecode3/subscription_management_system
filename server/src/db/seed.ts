@@ -4,6 +4,8 @@ import { closePool, pool, withTransaction } from './pool';
 import { logger } from '../utils/logger';
 import type { UserRole } from '../utils/jwt';
 import type { BillingInterval, ProductType } from '../utils/catalog.validators';
+import * as subscriptionService from '../services/subscription.service';
+import type { Requester } from '../services/requester';
 
 interface SeedAccount {
   name: string;
@@ -376,6 +378,64 @@ async function ensureTemplate(template: SeedTemplate): Promise<boolean> {
   return true;
 }
 
+/**
+ * Demo contracts are created through the service layer rather than with raw
+ * INSERTs, so the seeded rows obey exactly the same state machine, plan-flag
+ * checks and line pricing as anything a user creates. Only inserted once: if
+ * the table already has data, the demo set is skipped.
+ */
+async function seedSubscriptions(): Promise<number> {
+  const existing = await pool.query<{ count: string }>(
+    'SELECT COUNT(*)::text AS count FROM subscriptions',
+  );
+  if (Number(existing.rows[0]?.count ?? '0') > 0) return 0;
+
+  const accounts = await pool.query<{ id: number; email: string; role: UserRole }>(
+    `SELECT id, email, role FROM users WHERE email IN ('admin@brightloop.com', 'customer@brightloop.com')`,
+  );
+  const admin = accounts.rows.find((row) => row.role === 'ADMIN');
+  const customer = accounts.rows.find((row) => row.role === 'CUSTOMER');
+  if (!admin || !customer) {
+    logger.warn('Skipping demo subscriptions: demo accounts are missing.');
+    return 0;
+  }
+
+  const templates = await pool.query<{ id: number; name: string }>(
+    `SELECT id, name FROM quotation_templates
+      WHERE name IN ('Enterprise Monthly Starter', 'Annual Enterprise Rollout')`,
+  );
+  const monthlyTemplate = templates.rows.find((row) => row.name === 'Enterprise Monthly Starter');
+  const annualTemplate = templates.rows.find((row) => row.name === 'Annual Enterprise Rollout');
+  if (!monthlyTemplate || !annualTemplate) {
+    logger.warn('Skipping demo subscriptions: demo templates are missing.');
+    return 0;
+  }
+
+  const requester: Requester = { id: admin.id, role: 'ADMIN' };
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+    now.getDate(),
+  ).padStart(2, '0')}`;
+
+  const live = await subscriptionService.createSubscription(
+    { customerId: customer.id, templateId: monthlyTemplate.id, startDate: today },
+    requester,
+  );
+
+  for (const status of ['Quotation', 'Confirmed', 'Active'] as const) {
+    await subscriptionService.transitionStatus(live.id, { status }, requester);
+  }
+
+  // A second contract left in Draft, so the team board shows the whole
+  // progression rather than only the finished state.
+  await subscriptionService.createSubscription(
+    { customerId: customer.id, templateId: annualTemplate.id, startDate: today },
+    requester,
+  );
+
+  return 2;
+}
+
 async function main(): Promise<void> {
   const newAccounts = await seedAccounts();
 
@@ -387,6 +447,8 @@ async function main(): Promise<void> {
     if (await ensureTemplate(template)) newTemplates += 1;
   }
 
+  const newSubscriptions = await seedSubscriptions();
+
   const counts = await pool.query<{
     users: string;
     products: string;
@@ -394,6 +456,8 @@ async function main(): Promise<void> {
     plans: string;
     templates: string;
     template_lines: string;
+    subscriptions: string;
+    subscription_lines: string;
   }>(`
     SELECT
       (SELECT COUNT(*)::text FROM users)                     AS users,
@@ -401,12 +465,15 @@ async function main(): Promise<void> {
       (SELECT COUNT(*)::text FROM product_variants)          AS variants,
       (SELECT COUNT(*)::text FROM subscription_plans)        AS plans,
       (SELECT COUNT(*)::text FROM quotation_templates)       AS templates,
-      (SELECT COUNT(*)::text FROM quotation_template_lines)  AS template_lines
+      (SELECT COUNT(*)::text FROM quotation_template_lines)  AS template_lines,
+      (SELECT COUNT(*)::text FROM subscriptions)             AS subscriptions,
+      (SELECT COUNT(*)::text FROM subscription_lines)        AS subscription_lines
   `);
 
   const row = counts.rows[0]!;
   logger.info(
-    `Seed complete: ${newAccounts} new account(s), ${newTemplates} new template(s).`,
+    `Seed complete: ${newAccounts} new account(s), ${newTemplates} new template(s), ` +
+      `${newSubscriptions} new subscription(s).`,
   );
 
   console.log('Demo accounts (password for all three): ' + SEED_PASSWORD);
@@ -417,6 +484,9 @@ async function main(): Promise<void> {
   console.log(
     `Catalog: ${row.products} products, ${row.variants} variants, ${row.plans} plans, ` +
       `${row.templates} templates with ${row.template_lines} lines.`,
+  );
+  console.log(
+    `Subscriptions: ${row.subscriptions} contracts with ${row.subscription_lines} lines.`,
   );
 }
 

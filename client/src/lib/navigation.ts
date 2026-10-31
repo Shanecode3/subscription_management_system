@@ -1,7 +1,9 @@
 import {
   CalendarClock,
+  FileStack,
   LayoutDashboard,
   Package,
+  ReceiptText,
   ScrollText,
   type LucideIcon,
 } from 'lucide-react';
@@ -28,6 +30,8 @@ export const NAV_ITEMS: NavItem[] = [
     icon: ScrollText,
     roles: ['ADMIN', 'STAFF'],
   },
+  { to: '/subscriptions', label: 'Subscriptions', icon: FileStack, roles: ['ADMIN', 'STAFF'] },
+  { to: '/portal', label: 'My subscriptions', icon: ReceiptText, roles: ['CUSTOMER'] },
 ];
 
 const PAGE_TITLES: Record<string, string> = {
@@ -35,6 +39,8 @@ const PAGE_TITLES: Record<string, string> = {
   '/products': 'Products',
   '/plans': 'Plans',
   '/templates': 'Quotation templates',
+  '/subscriptions': 'Subscriptions',
+  '/portal': 'My subscriptions',
 };
 
 export function navItemsForRole(role: Role): NavItem[] {
@@ -42,5 +48,6 @@ export function navItemsForRole(role: Role): NavItem[] {
 }
 
 export function titleForPath(pathname: string): string {
+  if (pathname.startsWith('/subscriptions/')) return 'Subscription';
   return PAGE_TITLES[pathname] ?? 'Brightloop';
 }

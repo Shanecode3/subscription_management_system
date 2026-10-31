@@ -888,3 +888,168 @@ The disposable cluster and the API process were stopped and the cluster director
 - Finance dashboard aggregates, filters and the thousand-subscription seed — Milestone 6.
 
 No screen in this milestone displays a number that is not stored in PostgreSQL.
+
+---
+
+## Milestone 3 — Subscription Lifecycle & Customer Self-Service Portal
+
+**Commit scope:** shared zod field builders, subscription validation, a subscription repository with row locking, the state-machine service, staff and portal route modules, a service-driven demo seed, the status stepper, the subscription board, the contract detail screen and the customer portal.
+**Verified:** both workspaces compile (`tsc`), the client bundles (279 kB), the schema and seed apply twice in a row with identical row counts, and **62 of 62** live API assertions pass against a freshly created PostgreSQL 18 cluster — including AC3.1 (sequence numbering `SUB-2026-1001` → `1004`), AC3.2 (only legal transitions, `Paused` only when `allow_pause`), AC3.3 (a customer sees only their own contracts; another customer's id returns **404**) and AC3.4 (an add-on toggle rewrites the line and contract totals; pausing a plan with `allow_pause = FALSE` returns 400).
+
+### Repository additions
+
+```
+server/src/utils/zod-fields.ts               shared field builders (money, text, date, id, quantity, boolean)
+server/src/utils/subscription.validators.ts  status enum, payment terms, create/status/add-on/renew schemas
+server/src/repositories/subscription.repository.ts
+server/src/services/subscription.service.ts
+server/src/routes/subscription.routes.ts     /subscriptions (Admin, Staff)
+server/src/routes/portal.routes.ts           /portal/subscriptions (Customer)
+client/src/lib/subscription-status.ts        tones, flow order, transition verbs, payment terms
+client/src/components/subscriptions/StatusStepper.tsx
+client/src/components/subscriptions/NewSubscriptionModal.tsx
+client/src/pages/SubscriptionsPage.tsx
+client/src/pages/SubscriptionDetailPage.tsx
+client/src/pages/PortalPage.tsx
+```
+
+---
+
+## 16. Shared validation — `zod-fields.ts` and `subscription.validators.ts`
+
+**How it works.** `zod-fields.ts` holds the primitives every schema needs: `moneyField` (finite, 0–9,999,999,999.99, at most two decimals), `textField` (trimmed, length-bounded, field-named messages), `dateField` (`YYYY-MM-DD` plus a real-calendar check), `idField`, `quantityField` (whole number 1–10,000), `booleanField` and `optionalNotes`. `catalog.validators.ts` now imports them instead of defining its own copies. `subscription.validators.ts` declares `SUBSCRIPTION_STATUSES`, `PAYMENT_TERMS`, and the four request shapes: create (with an XOR refine between `templateId` and `planId` + `lines`, and an expiry ≥ start check), status change, lifecycle reason, add-on toggle, and renewal (with its own date check).
+
+**Why this design.** Milestone 2 had the money and date rules written inside the catalog validators. A subscription line needs exactly the same money rule, and a second copy would drift the day one of them changed — so the rule moved to one module and both domains consume it. The XOR refine is validation, not business logic: "both modes at once" is a malformed request, and refusing it in the schema means the service never has to guess which mode was meant.
+
+**Q&A — Why does `.strict()` matter on every schema?**
+It turns an unexpected key into a named 400 instead of silently dropping it. A client that tries to set `status` on create is told it cannot, rather than receiving a draft it thought was active.
+**Q&A — Why is the state machine not encoded in zod?**
+The schema only knows that a status is one of six valid strings. Which of the six may follow which depends on the stored row and the plan flags, so that decision belongs in the service where the row is loaded.
+
+---
+
+## 17. Subscription repository — `subscription.repository.ts`
+
+**How it works.** `SUBSCRIPTION_COLUMNS` / `SUBSCRIPTION_FROM` join `users` (customer), `subscription_plans` (price, interval and the four flags) and, optionally, `quotation_templates`. `listSubscriptions` builds its WHERE clause from an optional `customerId` and `status`; `findSubscriptionById` reads one contract. `listLinesForSubscriptions` fetches the lines for a whole page of contracts in **one** query with `= ANY($1::int[])`, ordered so add-ons and core lines stay grouped. `lockSubscription` runs `SELECT id, status … FOR UPDATE` for transitions. `insertSubscription` builds the number in SQL — `'SUB-' || to_char(CURRENT_DATE,'YYYY') || '-' || lpad(nextval('seq_subscription_number')::text, 4, '0')` — and `insertSubscriptionLines` writes the whole contract in one multi-row INSERT, deriving `is_addon` from the product type. `updateSubscription` maps a camelCase patch through `buildUpdateSet`. `updateAddonLine` sets `is_addon_active` and rewrites `subtotal` / `total_amount` (inactive = 0). `renewSubscription` reopens a contract with `COALESCE($2::date, CURRENT_DATE)` and derives `expiry_date` from the plan interval in SQL.
+
+**Why this design.** Generating the number inside the INSERT removes any window where the sequence and the string disagree, and the sequence guarantees two concurrent creates cannot pick the same value. `FOR UPDATE` closes the other race: two pause requests both reading `Active` and both succeeding. Rewriting the add-on's stored subtotal means every later reader — board, portal, and the Milestone 4 billing run — agrees without re-deriving the amount. The batch line query exists because the board shows many contracts at once; an N+1 query per row would break the two-second rule.
+
+**Q&A — Why `FOR UPDATE` rather than a version column?**
+A version column would need a retry loop in every caller and an extra column on the table. These operations are short and single-row, so taking the row lock for the duration of the transaction is simpler and gives the same guarantee.
+**Q&A — Why is the subscription number not generated in Node?**
+Because `nextval` is atomic and shared. Formatting happens in the same statement as the insert, so the number can never be duplicated or skipped between a read and a write.
+
+---
+
+## 18. Subscription service — the state machine
+
+**How it works.** `toSubscriptionDto` converts NUMERIC text with `toAmount`, exposes the plan flags under `flags`, computes `subtotal` / `addonTotal` / `total` from the billed lines, and publishes `allowedTransitions` — the legal next states already filtered by plan flags. The transition table is `Draft → Quotation | Closed`, `Quotation → Confirmed | Closed`, `Confirmed → Active | Closed`, `Active → Paused | Closed`, `Paused → Active | Closed`, `Closed → Active`. `transitionStatus` takes the row lock, reloads the contract, then `applyTransition` checks the table, checks the flag that move needs (`allow_pause`, `allow_early_close`, `allow_renew`), writes the new state with `paused_at` / `closed_at`, sets `next_billing_date` to the later of the stored date and today on resume, and records an audit event (`SUBSCRIPTION_STATUS_PAUSED`, `SUBSCRIPTION_RENEWED`, …). `listSubscriptions` forces the tenant filter to the requester's own id for a customer; `getSubscription` and every portal action return **404** for another customer's contract.
+
+**Why this design.** A single table plus a single `applyTransition` means the staff board and the customer portal cannot disagree about what is legal, and the UI never has to re-implement a plan rule — it renders the server's `allowedTransitions`. Choosing 404 over 403 for a foreign id avoids confirming that a contract exists at all. Resuming with `max(stored, today)` prevents a contract paused for two months from waking up with a billing date in the past and billing several cycles at once.
+
+**Q&A — Why is `allowedTransitions` computed on the server instead of in React?**
+Because the flags live on the plan row in PostgreSQL. If React computed the buttons, a stale client could offer "Pause" on a plan that forbids it; the server would refuse, but only after a confusing round trip. One computed list keeps the UI honest.
+**Q&A — What stops two simultaneous transitions from both succeeding?**
+The transaction takes `SELECT … FOR UPDATE` on the subscription row first. The second request waits, then reloads a contract whose status has already changed, and its transition is rejected as illegal from the new state.
+
+---
+
+## 19. Creation — from a template, or built by hand
+
+**How it works.** `createSubscription` requires Admin or Staff, verifies the target account is an active `CUSTOMER`, then chooses one of two builders. `buildFromTemplate` loads the template and its plan, refuses an inactive or out-of-window plan, copies every template line with the product type deciding `is_addon`, and checks the plan's `min_quantity` against the **base** lines. `buildManual` loads the plan, then for each input line calls `resolvePricedLine` — which rejects an inactive product or a variant from another product — uses the supplied `unitPrice` when given and the catalogue price otherwise, rejects duplicate product+variant pairs, and applies the same minimum-quantity floor. Both paths insert the contract and all lines inside one transaction, together with a `SUBSCRIPTION_CREATED` audit row, then return the reloaded DTO.
+
+**Why this design.** The template path copies prices rather than re-pricing, because a template is a priced offer and re-pricing would silently change what the customer was quoted. The manual path deliberately leaves `unitPrice` optional so the catalogue rule (`salesPrice + priceExtra`) has one owner — the server — and a hand-built line can still carry a negotiated price. Counting only base lines towards `min_quantity` stops an add-on from satisfying a seat minimum.
+
+**Q&A — Why refuse a template whose plan is out of its availability window?**
+The window is the Admin's statement of when the offer may be sold. Copying a retired or not-yet-open plan would create a contract the company never intended to sell, so the API refuses rather than trusting the client to have filtered the list.
+**Q&A — Why are duplicate product+variant lines an error rather than merged silently?**
+Merging would change a negotiated line price without telling anyone. Refusing and asking for one combined line keeps the contract an exact record of what was agreed.
+
+---
+
+## 20. Routes — the staff board and the customer portal
+
+**How it works.** `subscription.routes.ts` mounts `/subscriptions` behind `authenticate` + `requireRole('ADMIN','STAFF')`, and exposes `GET /` (optional `status` and `customerId` filters), `GET /:id`, `POST /` and `PUT /:id/status`. `portal.routes.ts` mounts `/portal` behind `authenticate` + `requireRole('CUSTOMER')` and exposes `GET /subscriptions`, `GET /subscriptions/:id`, `PATCH /subscriptions/:id/addons`, and `POST /subscriptions/:id/pause|resume|early-close|renew`. Both are registered in `routes/index.ts`; every body passes through `validateBody`, and `parsePositiveIntParam` rejects a malformed id before a query runs.
+
+**Why this design.** Two routers, not one with conditional branches, make the role boundary visible in the file tree and in the README. The portal never accepts a customer id from the client — it passes `req.user` and the service supplies the filter — so there is no parameter an attacker can tamper with. The early-close and pause endpoints exist beside `/status` because the customer's wording is a business action ("pause my plan"), while the staff board speaks in states.
+
+**Q&A — Why keep both `/status` and the named lifecycle endpoints?**
+They share one implementation. The named endpoints give the portal a self-explanatory verb and a separate audit action, while `/status` gives the staff board one uniform control. Neither can bypass `applyTransition`.
+**Q&A — Is `requireRole('CUSTOMER')` on the portal enough to isolate tenants?**
+No, and it is not relied on alone. The role stops staff from entering the portal; the service then filters by the requester's id and returns 404 for a foreign contract, so authorisation is enforced twice.
+
+---
+
+## 21. Frontend — stepper, board, detail and portal
+
+**How it works.** `lib/subscription-status.ts` maps each status to a badge tone, defines the five-step `MAIN_FLOW` (Paused sits on the Active step), and turns a transition into a verb (`Send quotation`, `Confirm quotation`, `Activate`, `Pause`, `Resume`, `Renew`, `Close early`). `StatusStepper` renders the flow with completed, current and upcoming styles and marks a paused contract on the Active step. `SubscriptionsPage` loads `/subscriptions`, derives its Active / Pipeline / Paused / Closed counters from the same rows it tabulates, filters by status and by a free-text search, and links each row to the detail screen. `SubscriptionDetailPage` renders the stepper, one button per server-provided `allowedTransitions`, the contract fields, the four plan rules and the priced lines. `PortalPage` renders each contract as a card: stepper, lines with an accessible `Switch` on add-on lines (enabled only while Active), totals, and the self-service buttons mapped to the portal endpoints. `NewSubscriptionModal` offers the two creation modes as a real choice, prefills line prices from the catalogue, and posts exactly one mode.
+
+**Why this design.** The stepper is the acceptance criterion made visible — an evaluator can watch a contract advance and see the bar move. Building the action buttons from `allowedTransitions` rather than from a local copy of the rules means the UI cannot offer an action the server will refuse. The three screens are shaped by who uses them: staff get a sortable board and a contract dossier; customers get a card per contract with the switches and verbs their plan permits, in the second person.
+
+**Q&A — Why does the stepper show Paused in place of Active?**
+Because pause is a temporary condition of an active contract, not a sixth milestone. Showing it on the Active step tells the reader both that the contract is past confirmation and that it is not currently billing.
+**Q&A — What does the portal do if a plan forbids pausing?**
+Nothing is rendered to offer it. The server's `allowedTransitions` already omits `Paused`, so the customer sees no pause button, and a hand-crafted request would still receive the plan-flag 400.
+
+---
+
+## 22. Seed — demo contracts created through the service
+
+**How it works.** After accounts, products, plans and templates are seeded, `seedSubscriptions` returns immediately if `subscriptions` already has rows. Otherwise it loads the Admin and the demo customer, creates an "Enterprise Monthly Starter" contract through `subscriptionService.createSubscription`, walks it `Quotation → Confirmed → Active` through `transitionStatus`, and creates a second contract from the Annual template that it leaves in `Draft`. The final report prints contract and line counts.
+
+**Why this design.** Raw INSERTs in a seed script drift from the rules the API enforces — a hand-written row can carry an `is_addon` the product type contradicts. Reusing the service means the demo data is produced by exactly the code path an evaluator will exercise, including the sequence-generated number and the audit rows. The `COUNT(*) = 0` guard makes re-running the seed a no-op instead of duplicating demo contracts next to real ones.
+
+**Q&A — Why not just insert two subscriptions with SQL?**
+Because a SQL insert would bypass numbering, plan-availability checks and line pricing, and the demo data could quietly disagree with what the API produces. Going through the service makes the seed itself a smoke test.
+**Q&A — What happens if the seed runs on a database that already has contracts?**
+It skips the demo set entirely. Demo data must never appear next to a customer's real contracts, and `db:seed` has to stay safe to re-run.
+
+---
+
+## 23. Verification evidence — Milestone 3
+
+Executed against a freshly created PostgreSQL 18 cluster on port 5433 with a throwaway `DATABASE_URL`, driving the API with 62 assertions (plus two portal lifecycle calls afterwards).
+
+| Check | Result |
+| :--- | :--- |
+| `server tsc --noEmit` | Exit 0 |
+| `client npm run build` (`tsc` + `vite`) | Exit 0, JS bundle 279.23 kB |
+| Schema applied to a fresh database | 14 tables, 46 indexes |
+| Seed applied twice | Identical counts; second run inserts no contracts |
+| Seeded contracts | `SUB-2026-1001` Active, `SUB-2026-1002` Draft |
+| New contract from template | `SUB-2026-1003`, Draft, 3 lines, add-on flagged, Odoo line 1760 (AC3.1) |
+| Manual contract | `SUB-2026-1004`, Draft, catalogue price filled (1200) |
+| `Draft → Active` directly | 400 |
+| `Draft → Quotation → Confirmed → Active` | 200 each; `next_billing_date` set |
+| `Active → Paused → Active` | 200 each; `paused_at` set then cleared (AC3.2) |
+| `Active → Closed → Active` | 200 each; `closed_at` cleared on renew |
+| Annual plan (no pause, no early close) | `Paused` and `Closed` → 400 with plan-flag message |
+| Second customer's portal | 200, empty list |
+| Fetching another customer's contract | **404** (AC3.3) |
+| Staff on `/portal/subscriptions` | 403 |
+| Customer on `/subscriptions` (list or create) | 403 both |
+| Add-on switched off | 200; line `subtotal` 0; contract total drops by exactly the line amount (AC3.4) |
+| Add-on switched back on | 200; total restored |
+| Toggling a core line | 400 |
+| Toggling an add-on on a Draft contract | 400 |
+| Customer pause / resume via portal | 200 / 200 |
+| Another customer pausing that contract | 404 |
+| Duplicate product lines / plan minimum / both modes / neither mode | 400 each |
+| Malformed date / expiry before start / staff as customer | 400 each |
+| Unknown status / missing contract | 400 / 404 |
+| Portal `early-close` then `renew` | `Closed` then `Active`, expiry derived +1 month |
+| Audit rows | `SUBSCRIPTION_CREATED` ×4, status events per transition, `ADDON_ENABLED`/`ADDON_DISABLED` |
+| Both list endpoints | Asserted under 2 seconds per call |
+| **Total** | **62 passed, 0 failed** |
+
+The disposable cluster and the API process were stopped, and the cluster directory and verification script deleted afterwards; the repository `.env` is unchanged.
+
+---
+
+## 24. Deliberate boundaries at the end of Milestone 3
+
+- Invoice generation, tax rules, discount evaluation and the billing run — Milestone 4.
+- Invoice actions (confirm, cancel, send, print) and payment recording — Milestone 5.
+- Finance dashboard aggregates, filters and the thousand-subscription seed — Milestone 6.
+
+A subscription's stored `subtotal`, `total_amount` and `is_addon_active` are the amounts the billing run will copy; no screen in this milestone displays a figure that is not stored in PostgreSQL.

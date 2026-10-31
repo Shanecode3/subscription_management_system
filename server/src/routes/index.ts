@@ -7,6 +7,8 @@ import { adminRouter } from './admin.routes';
 import { productRouter } from './product.routes';
 import { planRouter } from './plan.routes';
 import { templateRouter } from './template.routes';
+import { subscriptionRouter } from './subscription.routes';
+import { portalRouter } from './portal.routes';
 
 export const apiRouter = Router();
 
@@ -40,3 +42,5 @@ apiRouter.use('/admin', adminRouter);
 apiRouter.use('/products', productRouter);
 apiRouter.use('/plans', planRouter);
 apiRouter.use('/quotation-templates', templateRouter);
+apiRouter.use('/subscriptions', subscriptionRouter);
+apiRouter.use('/portal', portalRouter);
