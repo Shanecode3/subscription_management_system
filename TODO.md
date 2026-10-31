@@ -170,32 +170,34 @@
 - **AC4.4 (Invoice Printable Layout):** Given any invoice, When clicking "Print", Then display a clean printable invoice layout with company header, line item table, tax breakdown, and totals.
 
 ### Task Checklist
-- [ ] **4.1 Tax Rules Module:**
-  - [ ] Implement `server/src/routes/tax.routes.ts` & `tax.service.ts` (Admin-managed rates, e.g., GST 18%, VAT 10%).
-- [ ] **4.2 Admin Discount Engine:**
-  - [ ] Implement `server/src/routes/discount.routes.ts` & `discount.service.ts` (Admin-restricted).
-  - [ ] Implement validation rules: fixed vs percentage, min purchase amount, min quantity, date range, max usage limit.
-  - [ ] Implement scope logic: `whole_subscription` vs `specific_product`.
-  - [ ] Atomically increment `current_uses` and auto-expire rules.
-- [ ] **4.3 Idempotent Billing Day Engine:**
-  - [ ] Implement `server/src/services/billing.engine.ts` with batch processing inside a PostgreSQL transaction (`BEGIN`/`COMMIT`).
-  - [ ] Fetch all due active subscriptions: `WHERE status = 'Active' AND next_billing_date <= CURRENT_DATE`.
-  - [ ] Form idempotency key: `sub_{id}_{next_billing_date}` and enforce `UNIQUE(billing_cycle_key)`.
-  - [ ] Generate sequential invoice numbers: `INV-2026-XXXX`.
-  - [ ] Calculate lines, discounts, taxes, and advance `next_billing_date` by interval (`daily`, `weekly`, `monthly`, `yearly`).
-  - [ ] Auto-close subscriptions if `auto_close = TRUE` and expiry reached.
-- [ ] **4.4 Invoice Management & Actions:**
-  - [ ] Implement invoice action routes: `/confirm`, `/cancel`, `/send`, `/print`.
-  - [ ] Invoice state machine: `Draft` → `Confirmed` → `Paid` (or `Cancelled`).
-- [ ] **4.5 Frontend Billing Day & Invoice Studio:**
-  - [ ] Build `BillingDayView.tsx` with "Execute Billing Day" trigger, due subscriptions preview, and audit summary log.
-  - [ ] Build `InvoiceDetailView.tsx` with action buttons (Confirm, Cancel, Send, Print).
-  - [ ] Build clean printable layout `@media print` in `PrintInvoiceView.tsx`.
-- [ ] **4.6 Verification & Commit:**
-  - [ ] Test double-billing prevention by executing billing run multiple times.
-  - [ ] Verify discount usage limit and auto-close on contract expiry.
-  - [ ] Update `DEFENSE_LOG.md` (Milestone 4 entries).
-  - [ ] Git commit and push to `origin main`.
+- [x] **4.1 Tax Rules Module:**
+  - [x] Implement `server/src/routes/tax.routes.ts` & `tax.service.ts` (Admin-managed rates, e.g., GST 18%, VAT 10%).
+  - [x] Enforce a single default rate with a partial unique index; resolve per contract with a default fallback.
+- [x] **4.2 Admin Discount Engine:**
+  - [x] Implement `server/src/routes/discount.routes.ts` & `discount.service.ts` (Admin-restricted).
+  - [x] Implement validation rules: fixed vs percentage, min purchase amount, min quantity, date range, max usage limit.
+  - [x] Implement scope logic: `whole_subscription` vs `specific_product`.
+  - [x] Atomically increment `current_uses`, auto-expire rules, and detach dead rules from contracts.
+- [x] **4.3 Idempotent Billing Day Engine:**
+  - [x] Implement `server/src/services/billing.engine.ts` with batch processing inside a PostgreSQL transaction (`BEGIN`/`COMMIT`).
+  - [x] Fetch all due active subscriptions: `WHERE status = 'Active' AND next_billing_date <= CURRENT_DATE`.
+  - [x] Form idempotency key: `sub_{id}_{next_billing_date}` and enforce `UNIQUE(billing_cycle_key)`.
+  - [x] Generate sequential invoice numbers: `INV-2026-XXXX`.
+  - [x] Calculate lines, discounts, taxes, and advance `next_billing_date` by interval (`daily`, `weekly`, `monthly`, `yearly`).
+  - [x] Auto-close subscriptions if `auto_close = TRUE` and expiry reached.
+- [x] **4.4 Invoice Management & Actions:**
+  - [x] Implement invoice action routes: `/confirm`, `/cancel`, `/send`, `/print`.
+  - [x] Invoice state machine: `Draft` → `Confirmed` → `Paid` (or `Cancelled`).
+- [x] **4.5 Frontend Billing Day & Invoice Studio:**
+  - [x] Build `BillingDayView.tsx` with "Execute Billing Day" trigger, due subscriptions preview, and audit summary log.
+  - [x] Build `InvoiceDetailView.tsx` with action buttons (Confirm, Cancel, Send, Print).
+  - [x] Build clean printable layout `@media print` in `PrintInvoiceView.tsx`.
+  - [x] Build the invoice ledger (`InvoicesPage.tsx`), discount rules (`DiscountsPage.tsx`) and tax rules (`TaxRulesPage.tsx`) screens.
+- [x] **4.6 Verification & Commit:**
+  - [x] Test double-billing prevention by executing billing run multiple times — 52/52 live assertions, including AC4.1, AC4.2, AC4.3 and AC4.4.
+  - [x] Verify discount usage limit and auto-close on contract expiry.
+  - [x] Update `DEFENSE_LOG.md` (Milestone 4 entries).
+  - [x] Git commit and push to `origin main`.
 
 ---
 

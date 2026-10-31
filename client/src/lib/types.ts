@@ -179,3 +179,162 @@ export interface Subscription {
   createdAt: string;
   updatedAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// Billing, invoices, taxes and discounts (Milestone 4)
+// ---------------------------------------------------------------------------
+
+export interface TaxRule {
+  id: number;
+  name: string;
+  /** Percentage, two decimals: 18 means 18%. */
+  rate: number;
+  isActive: boolean;
+  isDefault: boolean;
+  createdAt: string;
+}
+
+export type DiscountType = 'percentage' | 'fixed';
+export type DiscountScope = 'whole_subscription' | 'specific_product';
+export type DiscountStanding = 'Active' | 'Scheduled' | 'Expired' | 'Exhausted' | 'Inactive';
+
+export interface DiscountRule {
+  id: number;
+  name: string;
+  code: string;
+  discountType: DiscountType;
+  discountValue: number;
+  scope: DiscountScope;
+  targetProductId: number | null;
+  targetProductName: string | null;
+  minPurchaseAmount: number;
+  minQuantity: number;
+  startDate: string;
+  endDate: string;
+  maxUses: number;
+  currentUses: number;
+  usesRemaining: number;
+  isActive: boolean;
+  standing: DiscountStanding;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type InvoiceStatus = 'Draft' | 'Confirmed' | 'Paid' | 'Cancelled';
+export type InvoiceAction = 'confirm' | 'cancel' | 'send' | 'print';
+
+export interface InvoiceLine {
+  id: number;
+  productId: number;
+  productName: string;
+  variantId: number | null;
+  variantLabel: string | null;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  discountAmount: number;
+  taxAmount: number;
+  totalAmount: number;
+  taxName: string | null;
+  taxRate: number;
+  discountCode: string | null;
+}
+
+export interface Invoice {
+  id: number;
+  invoiceNumber: string;
+  subscriptionId: number;
+  subscriptionNumber: string;
+  customerId: number;
+  customerName: string;
+  customerEmail: string;
+  customerCompany: string | null;
+  customerAddress: string | null;
+  planName: string;
+  paymentTerms: PaymentTerms;
+  billingCycleDate: string;
+  billingCycleKey: string;
+  status: InvoiceStatus;
+  issueDate: string;
+  dueDate: string;
+  subtotal: number;
+  taxTotal: number;
+  discountTotal: number;
+  totalAmount: number;
+  amountPaid: number;
+  balanceDue: number;
+  isOverdue: boolean;
+  daysOverdue: number;
+  sentAt: string | null;
+  cancelledAt: string | null;
+  notes: string | null;
+  allowedActions: InvoiceAction[];
+  lines: InvoiceLine[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BillingDueItem {
+  subscriptionId: number;
+  subscriptionNumber: string;
+  customerId: number;
+  customerName: string;
+  customerEmail: string;
+  planName: string;
+  billingInterval: BillingInterval;
+  paymentTerms: PaymentTerms;
+  nextBillingDate: string;
+  expiryDate: string | null;
+  lineCount: number;
+  subtotal: number;
+  discountAmount: number;
+  discountCode: string | null;
+  discountName: string | null;
+  taxName: string | null;
+  taxRate: number;
+  taxAmount: number;
+  totalAmount: number;
+  closesOnExpiry: boolean;
+}
+
+export interface BillingClosingItem {
+  subscriptionId: number;
+  subscriptionNumber: string;
+  expiryDate: string;
+}
+
+export interface BillingPreview {
+  asOf: string;
+  dueCount: number;
+  dueTotal: number;
+  items: BillingDueItem[];
+  closingCount: number;
+  closing: BillingClosingItem[];
+}
+
+export interface BillingInvoiceSummary {
+  invoiceId: number;
+  invoiceNumber: string;
+  subscriptionId: number;
+  subscriptionNumber: string;
+  customerName: string;
+  subtotal: number;
+  discountTotal: number;
+  discountCode: string | null;
+  taxTotal: number;
+  totalAmount: number;
+}
+
+export interface BillingRunResult {
+  ranAt: string;
+  totalEvaluated: number;
+  generatedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  closedCount: number;
+  invoices: BillingInvoiceSummary[];
+  skipped: { subscriptionId: number; subscriptionNumber: string; reason: string }[];
+  failures: { subscriptionId: number; subscriptionNumber: string; message: string }[];
+  closed: BillingClosingItem[];
+}

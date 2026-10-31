@@ -1053,3 +1053,183 @@ The disposable cluster and the API process were stopped, and the cluster directo
 - Finance dashboard aggregates, filters and the thousand-subscription seed — Milestone 6.
 
 A subscription's stored `subtotal`, `total_amount` and `is_addon_active` are the amounts the billing run will copy; no screen in this milestone displays a figure that is not stored in PostgreSQL.
+
+---
+
+# Milestone 4 — Automated Billing Day, Taxes, Discounts & Invoices
+
+## 25. Schema — `tax_rules`, `discount_rules`, `invoices`, `invoice_lines`
+
+**File & component.** `server/src/db/schema.sql` (sections 8, 9, 12, 13) plus two new columns on `subscriptions` (`discount_rule_id`, `tax_rule_id`).
+
+**How it works.** `tax_rules` stores `name`, `rate NUMERIC(5,2) CHECK (rate BETWEEN 0 AND 100)`, `is_active` and `is_default`. A **partial unique index** — `CREATE UNIQUE INDEX uq_tax_rules_single_default ON tax_rules (is_default) WHERE is_default = TRUE` — makes "two defaults" a database-level impossibility. `discount_rules` carries `code UNIQUE`, `discount_type` (`percentage`/`fixed`), `discount_value`, `scope` (`whole_subscription`/`specific_product`), `target_product_id`, `min_purchase_amount`, `min_quantity`, `start_date`, `end_date`, `max_uses`, `current_uses` and four CHECK constraints: `chk_discount_dates`, `chk_discount_scope_target`, `chk_discount_usage` (`current_uses <= max_uses`) and `chk_percentage_cap`. `invoices` holds `invoice_number UNIQUE`, `billing_cycle_key UNIQUE`, `status CHECK IN ('Draft','Confirmed','Paid','Cancelled')`, the four money totals, `amount_paid`, `sent_at` and `cancelled_at`, with `chk_invoice_dates` and `chk_invoice_paid_within_total`. `invoice_lines` copies the price, the discount (`discount_amount`, `discount_code`, `discount_rule_id`) and the tax (`tax_rule_id`, `tax_name`, `tax_rate`, `tax_amount`) at issue time. Indexes: `idx_subs_active_billing (status, next_billing_date) WHERE status = 'Active'`, `idx_invoices_status_due (status, due_date)`, `idx_invoices_customer_status (customer_id, status, issue_date DESC)`, `idx_invoices_subscription`, `idx_sub_lines_subscription`.
+
+**Why this design.** `uq_invoice_billing_cycle` is the idempotency guarantee, not a service-level `if`: even two processes on two machines cannot write the same cycle twice. The partial unique index solves "one default" with an index instead of a boolean the service must keep consistent. `tax_rule_id` on `invoice_lines` is `ON DELETE RESTRICT` — a rate that has priced a real invoice may be retired but never deleted, because deleting it would leave an invoice claiming a tax that no longer exists in any table; `discount_rule_id` is `ON DELETE SET NULL` because the line already stores `discount_code` and `discount_amount`, so the code survives the rule. Snapshotting name and rate onto the line means editing a tax rule later never rewrites history — which is exactly what a finance team needs when a rate changes mid-year.
+
+**Q&A — Why is `billing_cycle_key` a `UNIQUE` column instead of a composite key on `(subscription_id, billing_cycle_date)`?**
+Both give the same guarantee, but a single column also carries the shape of the cycle, which makes the idempotency rule readable in the audit log and lets a future cycle type (proration, one-off) share the table without changing the primary key. It is still derived deterministically as `sub_{subscription_id}_{billing_cycle_date}`.
+**Q&A — Why store `tax_name` and `tax_rate` on the line when the rule id is already there?**
+Because a rule can be renamed or re-rated after the invoice is issued, and an invoice is a legal document that must keep the rate it was issued at. The id keeps the audit link, the copied values keep the document truthful.
+
+---
+
+## 26. Tax rules — repository, service, routes
+
+**File & component.** `server/src/repositories/tax.repository.ts`, `server/src/services/tax.service.ts`, `server/src/routes/tax.routes.ts`.
+
+**How it works.** `listTaxRules(includeInactive)` filters to active rules only for a customer and returns everything for staff. `createTaxRule` / `updateTaxRule` run inside `withTransaction`: when `isDefault` is set, every other row is set to `is_default = FALSE` **before** the new one is written, so the partial unique index is never momentarily violated. Update refuses to make an inactive rule the default (`willBeActive = input.isActive ?? existing.is_active`), refuses duplicate names with a 409, and deactivation clears the default flag. `resolveTaxRule(subscription, rules, client)` returns the contract's own `tax_rule_id` when it is still active, else the active default, else `null` (zero-rated). Routes: `GET /` for every authenticated role, `POST/PATCH/DELETE` behind `requireRole('ADMIN')`.
+
+**Why this design.** Swapping the default inside one transaction is the only way to keep the single-default index happy under concurrency: a read-then-two-writes would leave two `TRUE` rows. Resolving the tax on the server, per billing transaction, means a rate change applies to every future invoice without touching the contracts — while issued invoices keep their snapshot. Deleting a rate is a soft retire (`is_active = FALSE`) rather than a `DELETE`, because `invoice_lines.tax_rule_id` is `ON DELETE RESTRICT` and history must stay readable.
+
+**Q&A — Why can a customer read tax rules?**
+So the portal can explain what it is being charged. The service narrows the list to active rules; authoring is still Admin-only, so reading a rate never implies the right to change it.
+**Q&A — What happens if the default rate is retired while contracts are active?**
+`resolveTaxRule` skips the inactive row and falls back to the next active default. If no default exists the invoice is raised zero-rated rather than failing the whole billing run — an unknown tax is better announced than silently guessed.
+
+---
+
+## 27. Discounts — evaluation, allocation, and the AC4.2 lifecycle
+
+**File & component.** `server/src/repositories/discount.repository.ts`, `server/src/services/discount.service.ts`, `server/src/routes/discount.routes.ts`, `server/src/utils/billing.validators.ts`.
+
+**How it works.** `listApplicableDiscountRules` returns rules that are `is_active`, inside `[start_date, end_date]` for `CURRENT_DATE` and under `max_uses`. `computeDiscountForRule` returns `null` when the rule's scope or thresholds do not match the invoice's lines (a `specific_product` rule needs a line for its target; `min_purchase_amount` and `min_quantity` are checked against the participants), otherwise it computes the percentage of the participating subtotal or the fixed amount, **capped at the line subtotal**, and spreads it across lines with largest-remainder allocation in integer cents. `rankApplicableDiscounts` sorts best-first. `claimDiscountUse` runs `UPDATE discount_rules SET current_uses = current_uses + 1 WHERE … current_uses < max_uses AND CURRENT_DATE BETWEEN start_date AND end_date RETURNING …`; a `null` result means another transaction took the last use and the engine moves on to the next-best rule. `canNeverApplyAgain` (inactive, past `end_date`, or `current_uses >= max_uses`) triggers `detachFromSubscriptions`, which sets `discount_rule_id = NULL` on every contract still pointing at the dead rule — on retire, on an edit that kills it, and in the billing engine right after the claim that exhausted it.
+
+**Why this design.** The usage cap lives in the `UPDATE … WHERE` clause because a read-then-write would let two concurrent billing runs both pass the check and overshoot `max_uses`. Detaching eagerly (rather than waiting for each contract's next billing day) keeps the data honest: a retired or exhausted rule should not still be shown as attached to a contract. Issued invoices keep `discount_code` and `discount_amount`, so removing the pointer never erases what a customer was actually charged. Percentage and fixed discounts share one code path, so the cap, scope and threshold rules cannot drift between the two types.
+
+**Q&A — AC4.2 says an expired discount must stop applying and be de-linked. Where is that enforced?**
+Three times over: the SQL selection excludes past-`end_date` rules, the atomic claim repeats the window check, and `detachIfDead` clears the attachment from every subscription as soon as the rule can never apply again. A future invoice therefore cannot contain it, and the contract no longer advertises it.
+**Q&A — Why keep `current_uses` on the rule instead of counting invoice lines every run?**
+A counter updated inside the claim is O(1) and race-safe; counting lines each run would scan the whole invoice history and still race between two runs. Because the count only ever goes up through the atomic claim, it can never exceed `max_uses` — the CHECK constraint would reject it if it tried.
+
+---
+
+## 28. Invoices — repository, state machine, and tenant isolation
+
+**File & component.** `server/src/repositories/invoice.repository.ts`, `server/src/services/invoice.service.ts`, `server/src/routes/invoice.routes.ts`, `client/src/lib/invoice-status.ts`.
+
+**How it works.** `insertInvoice` generates the number in SQL — `'INV-' || to_char(CURRENT_DATE,'YYYY') || '-' || lpad(nextval('seq_invoice_number')::text, 4, '0')` — and `insertInvoiceLines` writes all lines in one multi-row insert. `listInvoices` filters by optional customer, status, `from`/`to` and `limit`, ordered by `issue_date DESC, id DESC`; overdue is computed in SQL (`CURRENT_DATE - due_date`) so no row is re-read in Node. `toInvoiceDto` exposes `isOverdue`, `daysOverdue` and `allowedActions`, computed by `allowedActionsFor(status)` from one table: `confirm: ['Draft']`, `send`/`cancel`: `['Draft','Confirmed']`, `print`: `['Draft','Confirmed','Paid','Cancelled']`. `performInvoiceAction` takes `lockInvoice` (`SELECT … FOR UPDATE`), re-reads the row, rejects an illegal transition with a specific message (`This invoice is already confirmed.`, `A cancelled invoice cannot be confirmed.`), applies the patch (`status`, `cancelledAt`, `sentAt`, appended note) and records `INVOICE_CONFIRMED` / `INVOICE_SENT` / `INVOICE_CANCELLED` / `INVOICE_PRINTED` in the same transaction. `assertVisible` returns **404** for another customer's invoice.
+
+**Why this design.** The legality of an action belongs on the server because the status is a database fact; the client receives `allowedActions` and renders only those buttons, so the UI cannot offer an illegal move. One action table plus one implementation means Confirm, Send, Cancel and Print can never disagree about which states they accept. The list query deliberately does not join lines — a hundred-invoice ledger should not fan out into a thousand lines just to draw header figures. For a customer, the tenant filter comes from the token, never the query string, and a foreign id is a 404 so the API does not confirm that someone else's invoice exists.
+
+**Q&A — Why is printing a `POST` rather than a plain `GET` of a printable page?**
+Because printing is an audited team action: the `POST` records `INVOICE_PRINTED`. The page itself is a normal authenticated route (`/invoices/:id/print`), and the toolbar offers a "Print invoice" button that records the action and then opens the browser dialog.
+**Q&A — Why is `Paid` unreachable in this milestone?**
+Payments arrive in Milestone 5. The state table already lists `Paid` for print and for the future transition, so adding the payment flow will not require editing the UI's action logic.
+
+---
+
+## 29. The billing engine — preview, run, and zero double-billing
+
+**File & component.** `server/src/services/billing.engine.ts` (`previewBillingDay`, `runBillingDay`, `billOne`, `evaluateInvoice`, `advanceBillingCycle` call site), `server/src/routes/billing.routes.ts`.
+
+**How it works.** `previewBillingDay` runs four reads in parallel — due subscriptions, expired auto-close contracts, tax rules, applicable discounts — fetches every line of the due contracts in one query, and evaluates each contract with the same `evaluateInvoice` the run uses; the result carries `dueCount`, `dueTotal`, per-contract subtotal/discount/tax/total and the list of contracts that will be auto-closed. `runBillingDay` first closes contracts whose `auto_close` plan flag and `expiry_date` are in the past (`SUBSCRIPTION_AUTO_CLOSED` per row), then bills the remaining due list one contract per **own transaction**: lock the row `FOR UPDATE`, re-check it is still `Active` and still due, build `billing_cycle_key = sub_{id}_{next_billing_date}`, look up that key (already billed → skip), take the billable lines (`!is_addon || is_addon_active`), rank and claim a discount, resolve the tax rule, insert the invoice and its snapshot lines, advance `next_billing_date`, de-link an exhausted rule, auto-close if the next cycle would start after expiry, and write `INVOICE_GENERATED`. A `23505` unique violation on the cycle key becomes a **skip**; an `AppError` becomes a **failure** for that row only. The response reports `totalEvaluated / generatedCount / skippedCount / failedCount / closedCount` plus the invoice summaries, skipped reasons, failures and closed contracts.
+
+**Why this design.** The `UNIQUE (billing_cycle_key)` constraint is the real guard; the pre-check inside the lock is there to avoid consuming a discount for an invoice that will not be written. Both exist because the lock protects against an in-process race and the constraint protects against everything else — a second process, a retry, a manual re-run. One transaction per contract means a single broken contract cannot roll back the 999 that were fine, and the customer still gets a precise reason in `failures`. `advanceBillingCycle` advances one interval, or jumps to `CURRENT_DATE + interval` when the stored date has fallen far behind, so a contract can never stay due after a run and cause a burst of catch-up invoices. Because preview and run share `evaluateInvoice`, the figures the operator approves are exactly the figures that get invoiced.
+
+**Q&A — AC4.3: what happens if the evaluator runs Billing Day twice?**
+The first run bills every due contract and advances each `next_billing_date`; the second finds nothing due, so `generatedCount` is 0 — and even if a contract were somehow still due, the unique cycle key would turn the insert into a skip rather than a duplicate. Verified: run 1 generated 1 invoice, run 2 generated 0.
+**Q&A — Why close expired contracts before billing instead of during the loop?**
+The closing pass decides what is billable. Closing first means an expired contract is reported once, as closed, and never appears in the invoice list — the ordering is what makes "closed, not invoiced" deterministic instead of dependent on which check ran first inside the row transaction.
+
+---
+
+## 30. Routes — `/tax-rules`, `/discount-rules`, `/invoices`, `/billing`
+
+**File & component.** `server/src/routes/tax.routes.ts`, `discount.routes.ts`, `invoice.routes.ts`, `billing.routes.ts`, mounted in `routes/index.ts`.
+
+**How it works.** Every router starts with `authenticate`. `tax-rules`: read for all roles, write for `ADMIN`. `discount-rules`: the router is `ADMIN`/`STAFF` so staff can see what is running, while `POST/PATCH/DELETE` add `requireRole('ADMIN')` — a staff request is refused with 403 **before** the body is parsed. `invoices`: `GET /` and `GET /:id` for all roles (the service narrows a customer), `POST /:id/{confirm,send,cancel,print}` looped from `INVOICE_ACTIONS`, each through `validateBody(invoiceActionSchema)`. `billing`: `ADMIN`/`STAFF` only, `GET /pending` and `POST /run-billing-day`. Local helpers `parseStatusFilter`, `parseOptionalId`, `parseDateFilter` (rejects anything but `YYYY-MM-DD`) and `parseLimit` (1–500) validate the query string before SQL sees it, and `parsePositiveIntParam` guards ids.
+
+**Why this design.** The 403-before-parse ordering is what makes AC4.1 unambiguous: an unauthorised role cannot even learn the shape of a discount payload from validation errors. Parsing dates in the route keeps PostgreSQL's `22007 invalid datetime format` from surfacing as a 500; the user gets "From date must be a date in YYYY-MM-DD format." Billing day is staff-only because it writes invoices for every customer at once.
+
+**Q&A — Why does a staff account get 403 and not 400 on discount creation?**
+Because authorisation is checked before body validation, by design. A 400 would leak which fields exist and invite probing; the middleware rejects the request on role alone.
+**Q&A — What stops a customer from filtering the invoice list by another customer id?**
+The route accepts `customerId` only as a staff convenience, and the service overrides it with `requester.id` for a customer. Whatever the query string says, the SQL is filtered by the token's owner.
+
+---
+
+## 31. Frontend — Billing Day, Invoice Studio, printable sheet, discounts and taxes
+
+**File & component.** `client/src/pages/BillingDayView.tsx`, `InvoicesPage.tsx`, `InvoiceDetailView.tsx`, `PrintInvoiceView.tsx`, `DiscountsPage.tsx`, `TaxRulesPage.tsx`, `components/billing/DiscountFormModal.tsx`, `components/billing/TaxRuleFormModal.tsx`, `lib/invoice-status.ts`, `lib/navigation.ts`, `App.tsx`, `index.css`.
+
+**How it works.** `BillingDayView` loads `/billing/pending`, shows the due count, the expected total and any contracts that will auto-close, tabulates each due contract with its subtotal, discount code, tax name/rate and total, then runs the billing day behind a confirmation `Modal`; the result panel lists the invoices just raised with links, the skipped reasons, the failures and the auto-closed contracts. `InvoicesPage` shows Outstanding / Collected / Overdue tiles derived from the ledger, a status filter and a search, and a table with an "N days late" hint on overdue rows. `InvoiceDetailView` renders the header, the bill-to block, the contract link, the cycle key, a totals card whose tax rows are grouped by `name@rate` from the line snapshots, and the line table; its action bar is built from `invoice.allowedActions`, with Print as a link and Cancel behind a confirmation. `PrintInvoiceView` is a standalone document outside `AppShell`: a `.no-print` toolbar whose "Print invoice" button posts the print action and then opens the browser dialog, and a `.print-sheet` article with the company header, bill-to, contract block, line table, tax breakdown and footer. `index.css` adds an `@media print` block that sets A4 margins, removes the tinted background and hides `.no-print`. `DiscountsPage` gives Admins create/edit/retire/restore and Staff a read-only view of the same rules, with a usage bar and a standing badge (Active / Scheduled / Expired / Exhausted / Inactive). `TaxRulesPage` lists rates with their default and status, and retires rather than deletes. `navigation.ts` and `App.tsx` add `/billing`, `/invoices`, `/invoices/:id`, `/invoices/:id/print`, `/discounts` and `/tax-rules`, each behind the same role guard the sidebar advertises.
+
+**Why this design.** The action bar is data-driven from `allowedActions`, so a cancelled invoice shows only Print and a draft shows Confirm/Send/Cancel/Print — the screen can never offer a move the API will reject. The Billing Day screen shows the preview before the button because a bulk write deserves an approval step, and showing the exact totals first means the operator is approving figures, not an abstract "run". The print view lives at its own route, outside the shell, so the browser prints one clean sheet with no sidebar or page background. Discount forms mirror the server's rules locally so the user sees the same message before the round trip, while the server remains the authority.
+
+**Q&A — What does the Billing Day screen do if a contract fails mid-run?**
+It lists it under failures with the server's message while the invoices that succeeded stay in the ledger — each contract is its own transaction, so one failure does not discard the run.
+**Q&A — Why is the customer allowed to open `/invoices` at all?**
+The rubric gives a customer a portal for their own invoices. The page is shared, but `GET /invoices` narrows the result to the requester's id, so a customer sees only their own rows, and opening another customer's id returns 404.
+
+---
+
+## 32. Seed — tax and discount fixtures
+
+**File & component.** `server/src/db/seed.ts` (`SEED_TAX_RULES`, `SEED_DISCOUNT_RULES`, `ensureTaxRule`, `ensureDiscountRule`).
+
+**How it works.** `ensureTaxRule` looks the rule up by name, clears any old default inside a transaction and inserts GST 18% (default), VAT 10% and Zero-rated / Exempt 0. `ensureDiscountRule` looks up by `code`, attributes the rule to the Admin account, resolves the target product for the product-scoped rule and inserts `WELCOME10` (10% whole-subscription, 2026, 100 uses) and `SUPPORT25` (fixed 25 on Priority Support 24/7, `min_purchase_amount` 300, 50 uses), with `ON CONFLICT (code) DO NOTHING`. The report adds "Billing setup: N tax rules, M discount rules."
+
+**Why this design.** The seed must produce data the API would accept: a default rate, a live percentage discount, a capped one and a product-scoped one, so every branch of the engine has a fixture. Looking up before inserting keeps `db:seed` idempotent — re-running it does not duplicate rules or steal the default flag back from an Admin who changed it.
+
+**Q&A — Why seed a discount that a later run will exhaust?**
+It gives the demo real usage: the first invoice consumes WELCOME10 and the verification then retires it through the API, exactly as an Admin would stop a promo. That path is also what proves the de-link behaviour.
+**Q&A — Why attribute discounts to the Admin account?**
+Because `discount_rules.created_by` is `NOT NULL REFERENCES users(id)`, and the rubric says only an Admin may create a discount. Seeding them under the Admin keeps the demo consistent with that rule.
+
+---
+
+## 33. Verification evidence — Milestone 4
+
+Executed against a freshly created PostgreSQL 18 cluster on port 5433 (throwaway `DATABASE_URL`), schema applied (14 tables, 47 indexes), seeded, and the API driven over HTTP by a script of **52 assertions**, followed by SQL invariant queries.
+
+| Check | Result |
+| :--- | :--- |
+| `server tsc --noEmit` | Exit 0 |
+| `client tsc --noEmit` + `vite build` | Exit 0, JS 336.51 kB |
+| Schema on a fresh database | 14 tables, 47 indexes |
+| Seed | 3 accounts, 3 templates, 3 tax rules, 2 discounts, 2 contracts |
+| Staff `POST /discount-rules` | **403** — "requires the ADMIN role" (AC4.1) |
+| Staff `GET /discount-rules` | 200 (read-only) |
+| Customer discount list / create | 403 / 403 |
+| Tax rate 150 / percentage 150 | 400 each, field-level `details` |
+| Product-scoped discount without target | 400 — "Choose the product this discount applies to." |
+| End date before start date | 400 |
+| Duplicate tax rule name | 409 |
+| `GET /invoices?from=31-10-2026` | 400 before SQL |
+| New default tax rule | Old default cleared; exactly one default remains; restored to GST 18% |
+| `GET /billing/pending` before run | `dueCount 1`, `dueTotal 4216.14` |
+| Run #1 | 1 generated, 0 skipped, 0 failed |
+| Run #2 (same day) | **0 generated** (AC4.3) |
+| Preview after run | `dueCount 0` |
+| Invoice maths | 3970.00 − 397.00 + 643.14 = **4216.14**; tax name/rate and discount code snapshotted |
+| Invoice number | `INV-2026-1001` |
+| Confirm → confirm again | 200 then 400 "already confirmed" |
+| Send / Print | `sentAt` recorded / 200 |
+| Customer confirm | 403 |
+| Auto-close contract (expiry 2 days ago) | Closed by the run, **not invoiced** |
+| WELCOME10 + SUPPORT25 retired | 200; 200 |
+| Expired rule stored | standing `Expired` |
+| Two new contracts, one single-use rule | 1 discounted (198.50), 1 undiscounted (0.00) (AC4.2) |
+| Expired rule on any invoice | never applied |
+| Undiscounted invoice maths | 3970.00 + 714.60 = 4684.60; discounted 3970.00 − 198.50 + 678.87 = 4450.37 |
+| Single-use counter | `current_uses 1 / max_uses 1`, standing `Exhausted` |
+| Cancel with note / confirm a cancelled invoice | 200 / 400 |
+| Customer invoice list | Only their own rows |
+| Another customer's invoice / billing day | **404** / 403 |
+| SQL: duplicate `billing_cycle_key` | 0 |
+| SQL: invoice total ≠ Σ line totals | 0 |
+| SQL: double-billed subscription + cycle | 0 |
+| SQL: subscription still pointing at a dead rule | 0 |
+| SQL: lines whose rule was retired afterwards | 3 — expected; history keeps its snapshot |
+| **Total** | **52 passed, 0 failed** |
+
+The disposable cluster and the API process were stopped, and the cluster directory, logs and verification script deleted; the repository `.env` was never modified or printed.
+
+---
+
+## 34. Deliberate boundaries at the end of Milestone 4
+
+- Payment recording, the `Paid` transition and the outstanding/overdue finance aggregates — Milestones 5 and 6.
+- Bulk seed of thousands of subscriptions and the `< 2 s` dashboard benchmark — Milestone 6; the indexes that benchmark depends on (`idx_subs_active_billing`, `idx_invoices_status_due`, `idx_invoices_customer_status`) are already in place.
+- No email is actually sent by `send`; the action records `sent_at` and the audit row, which is the state change the rubric asks for.
+- `PortalPage` does not list invoices inline; customers reach their own invoices through `/invoices`, which the API already narrows to their records.

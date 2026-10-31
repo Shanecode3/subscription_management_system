@@ -371,19 +371,35 @@ CREATE TRIGGER trg_invoices_updated_at
 -- 13. invoice_lines
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS invoice_lines (
-    id              SERIAL PRIMARY KEY,
-    invoice_id      INT           NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
-    product_id      INT           NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
-    variant_id      INT           REFERENCES product_variants(id) ON DELETE SET NULL,
-    description     VARCHAR(255)  NOT NULL,
-    quantity        INT           NOT NULL DEFAULT 1 CHECK (quantity > 0),
-    unit_price      NUMERIC(12,2) NOT NULL CHECK (unit_price >= 0),
-    discount_amount NUMERIC(12,2) NOT NULL DEFAULT 0.00 CHECK (discount_amount >= 0),
-    tax_amount      NUMERIC(12,2) NOT NULL DEFAULT 0.00 CHECK (tax_amount >= 0),
-    total_amount    NUMERIC(12,2) NOT NULL CHECK (total_amount >= 0)
+    id               SERIAL PRIMARY KEY,
+    invoice_id       INT           NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    product_id       INT           NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+    variant_id       INT           REFERENCES product_variants(id) ON DELETE SET NULL,
+    description      VARCHAR(255)  NOT NULL,
+    quantity         INT           NOT NULL DEFAULT 1 CHECK (quantity > 0),
+    unit_price       NUMERIC(12,2) NOT NULL CHECK (unit_price >= 0),
+    discount_amount  NUMERIC(12,2) NOT NULL DEFAULT 0.00 CHECK (discount_amount >= 0),
+    tax_amount       NUMERIC(12,2) NOT NULL DEFAULT 0.00 CHECK (tax_amount >= 0),
+    total_amount     NUMERIC(12,2) NOT NULL CHECK (total_amount >= 0),
+    -- Snapshots taken at billing time. The rate is copied, not joined, so a
+    -- later change to tax_rules never rewrites an invoice already issued.
+    tax_rule_id      INT           REFERENCES tax_rules(id) ON DELETE RESTRICT,
+    tax_name         VARCHAR(100),
+    tax_rate         NUMERIC(5,2)  NOT NULL DEFAULT 0.00 CHECK (tax_rate >= 0 AND tax_rate <= 100),
+    discount_rule_id INT           REFERENCES discount_rules(id) ON DELETE SET NULL
 );
 
+-- Upgrade path for databases created before the Milestone 4 tax snapshot columns.
+ALTER TABLE invoice_lines ADD COLUMN IF NOT EXISTS tax_rule_id INT
+    REFERENCES tax_rules(id) ON DELETE RESTRICT;
+ALTER TABLE invoice_lines ADD COLUMN IF NOT EXISTS tax_name VARCHAR(100);
+ALTER TABLE invoice_lines ADD COLUMN IF NOT EXISTS tax_rate NUMERIC(5,2) NOT NULL DEFAULT 0.00;
+ALTER TABLE invoice_lines ADD COLUMN IF NOT EXISTS discount_rule_id INT
+    REFERENCES discount_rules(id) ON DELETE SET NULL;
+
 CREATE INDEX IF NOT EXISTS idx_invoice_lines_invoice ON invoice_lines (invoice_id);
+CREATE INDEX IF NOT EXISTS idx_invoice_lines_discount ON invoice_lines (discount_rule_id)
+    WHERE discount_rule_id IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- 14. payments — append-only ledger

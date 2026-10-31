@@ -59,6 +59,27 @@ interface SeedTemplate {
   lines: SeedTemplateLine[];
 }
 
+interface SeedTaxRule {
+  name: string;
+  rate: number;
+  isDefault: boolean;
+}
+
+interface SeedDiscountRule {
+  name: string;
+  code: string;
+  discountType: 'percentage' | 'fixed';
+  discountValue: number;
+  scope: 'whole_subscription' | 'specific_product';
+  /** Required when the scope is specific_product. */
+  targetProductName: string | null;
+  minPurchaseAmount: number;
+  minQuantity: number;
+  startDate: string;
+  endDate: string;
+  maxUses: number;
+}
+
 /** Demo password satisfies the 9+ / upper / lower / special rule. */
 const SEED_PASSWORD = 'Brightloop@2026';
 
@@ -213,6 +234,49 @@ const SEED_TEMPLATES: SeedTemplate[] = [
     validityDays: 14,
     notes: 'Renewal quote for customers who keep only the support retainer.',
     lines: [{ productName: 'Priority Support 24/7', quantity: 1 }],
+  },
+];
+
+/**
+ * Three rates so the invoice tax breakdown has more than one row to group by,
+ * and so a contract can be pointed at a non-default rate to prove the snapshot.
+ */
+const SEED_TAX_RULES: SeedTaxRule[] = [
+  { name: 'GST 18%', rate: 18, isDefault: true },
+  { name: 'VAT 10%', rate: 10, isDefault: false },
+  { name: 'Zero-rated / Exempt', rate: 0, isDefault: false },
+];
+
+/**
+ * One whole-subscription rule and one product-scoped rule, so the engine's two
+ * scopes, both discount types and the threshold checks are all visible in the UI.
+ */
+const SEED_DISCOUNT_RULES: SeedDiscountRule[] = [
+  {
+    name: 'Welcome offer — 10% off the first invoice',
+    code: 'WELCOME10',
+    discountType: 'percentage',
+    discountValue: 10,
+    scope: 'whole_subscription',
+    targetProductName: null,
+    minPurchaseAmount: 0,
+    minQuantity: 0,
+    startDate: '2026-01-01',
+    endDate: '2026-12-31',
+    maxUses: 100,
+  },
+  {
+    name: 'Priority support launch — USD 25 off',
+    code: 'SUPPORT25',
+    discountType: 'fixed',
+    discountValue: 25,
+    scope: 'specific_product',
+    targetProductName: 'Priority Support 24/7',
+    minPurchaseAmount: 300,
+    minQuantity: 1,
+    startDate: '2026-01-01',
+    endDate: '2026-12-31',
+    maxUses: 50,
   },
 ];
 
@@ -378,6 +442,81 @@ async function ensureTemplate(template: SeedTemplate): Promise<boolean> {
   return true;
 }
 
+async function ensureTaxRule(rule: SeedTaxRule): Promise<boolean> {
+  const existing = await pool.query('SELECT id FROM tax_rules WHERE LOWER(name) = LOWER($1)', [
+    rule.name,
+  ]);
+  if (existing.rowCount) return false;
+
+  await withTransaction(async (client) => {
+    // Only one rule may hold the default flag (partial unique index), so the
+    // seeded default clears any existing holder first.
+    if (rule.isDefault) {
+      await client.query('UPDATE tax_rules SET is_default = FALSE WHERE is_default = TRUE');
+    }
+    await client.query(
+      `INSERT INTO tax_rules (name, rate, is_active, is_default)
+       VALUES ($1, $2, TRUE, $3)`,
+      [rule.name, rule.rate, rule.isDefault],
+    );
+  });
+
+  return true;
+}
+
+async function ensureDiscountRule(rule: SeedDiscountRule): Promise<boolean> {
+  const existing = await pool.query('SELECT id FROM discount_rules WHERE code = $1', [rule.code]);
+  if (existing.rowCount) return false;
+
+  const admin = await pool.query<{ id: number }>(
+    `SELECT id FROM users WHERE role = 'ADMIN' ORDER BY id ASC LIMIT 1`,
+  );
+  const adminId = admin.rows[0]?.id;
+  if (adminId === undefined) {
+    logger.warn(`Skipping discount "${rule.code}": no Admin account to attribute it to.`);
+    return false;
+  }
+
+  let targetProductId: number | null = null;
+  if (rule.targetProductName !== null) {
+    const product = await pool.query<{ id: number }>(
+      'SELECT id FROM products WHERE name = $1',
+      [rule.targetProductName],
+    );
+    targetProductId = product.rows[0]?.id ?? null;
+    if (targetProductId === null) {
+      logger.warn(`Skipping discount "${rule.code}": unknown product "${rule.targetProductName}".`);
+      return false;
+    }
+  }
+
+  const inserted = await pool.query(
+    `INSERT INTO discount_rules (
+       name, code, discount_type, discount_value, scope, target_product_id,
+       min_purchase_amount, min_quantity, start_date, end_date, max_uses,
+       current_uses, is_active, created_by
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, TRUE, $12)
+     ON CONFLICT (code) DO NOTHING`,
+    [
+      rule.name,
+      rule.code,
+      rule.discountType,
+      rule.discountValue,
+      rule.scope,
+      targetProductId,
+      rule.minPurchaseAmount,
+      rule.minQuantity,
+      rule.startDate,
+      rule.endDate,
+      rule.maxUses,
+      adminId,
+    ],
+  );
+
+  return (inserted.rowCount ?? 0) > 0;
+}
+
 /**
  * Demo contracts are created through the service layer rather than with raw
  * INSERTs, so the seeded rows obey exactly the same state machine, plan-flag
@@ -447,6 +586,16 @@ async function main(): Promise<void> {
     if (await ensureTemplate(template)) newTemplates += 1;
   }
 
+  let newTaxRules = 0;
+  for (const rule of SEED_TAX_RULES) {
+    if (await ensureTaxRule(rule)) newTaxRules += 1;
+  }
+
+  let newDiscountRules = 0;
+  for (const rule of SEED_DISCOUNT_RULES) {
+    if (await ensureDiscountRule(rule)) newDiscountRules += 1;
+  }
+
   const newSubscriptions = await seedSubscriptions();
 
   const counts = await pool.query<{
@@ -456,6 +605,8 @@ async function main(): Promise<void> {
     plans: string;
     templates: string;
     template_lines: string;
+    tax_rules: string;
+    discount_rules: string;
     subscriptions: string;
     subscription_lines: string;
   }>(`
@@ -466,6 +617,8 @@ async function main(): Promise<void> {
       (SELECT COUNT(*)::text FROM subscription_plans)        AS plans,
       (SELECT COUNT(*)::text FROM quotation_templates)       AS templates,
       (SELECT COUNT(*)::text FROM quotation_template_lines)  AS template_lines,
+      (SELECT COUNT(*)::text FROM tax_rules)                 AS tax_rules,
+      (SELECT COUNT(*)::text FROM discount_rules)            AS discount_rules,
       (SELECT COUNT(*)::text FROM subscriptions)             AS subscriptions,
       (SELECT COUNT(*)::text FROM subscription_lines)        AS subscription_lines
   `);
@@ -473,6 +626,7 @@ async function main(): Promise<void> {
   const row = counts.rows[0]!;
   logger.info(
     `Seed complete: ${newAccounts} new account(s), ${newTemplates} new template(s), ` +
+      `${newTaxRules} new tax rule(s), ${newDiscountRules} new discount(s), ` +
       `${newSubscriptions} new subscription(s).`,
   );
 
@@ -487,6 +641,9 @@ async function main(): Promise<void> {
   );
   console.log(
     `Subscriptions: ${row.subscriptions} contracts with ${row.subscription_lines} lines.`,
+  );
+  console.log(
+    `Billing setup: ${row.tax_rules} tax rules, ${row.discount_rules} discount rules.`,
   );
 }
 

@@ -93,7 +93,7 @@ These are local seed accounts for evaluation only.
 
 ---
 
-## API surface (Milestones 1–3)
+## API surface (Milestones 1–4)
 
 Base path: `/api/v1`
 
@@ -133,6 +133,22 @@ Base path: `/api/v1`
 | `POST` | `/portal/subscriptions/:id/resume` | **Customer only** |
 | `POST` | `/portal/subscriptions/:id/early-close` | **Customer only** — needs `allow_early_close` |
 | `POST` | `/portal/subscriptions/:id/renew` | **Customer only** — needs `allow_renew` |
+| `GET` | `/tax-rules` | Authenticated — customers see active rates only |
+| `POST` | `/tax-rules` | **Admin only** — one default at a time |
+| `PATCH` | `/tax-rules/:id` | **Admin only** |
+| `DELETE` | `/tax-rules/:id` | **Admin only** — retires the rate, keeps history |
+| `GET` | `/discount-rules` | Admin, Staff |
+| `POST` | `/discount-rules` | **Admin only** — staff receives 403 |
+| `PATCH` | `/discount-rules/:id` | **Admin only** |
+| `DELETE` | `/discount-rules/:id` | **Admin only** — retires the rule and detaches it |
+| `GET` | `/invoices` | Authenticated — filter by `status`, `customerId`, `from`, `to`, `limit`; customers see only their own |
+| `GET` | `/invoices/:id` | Authenticated — 404 for another customer's invoice |
+| `POST` | `/invoices/:id/confirm` | Admin, Staff — `Draft → Confirmed` |
+| `POST` | `/invoices/:id/send` | Admin, Staff — records `sentAt` |
+| `POST` | `/invoices/:id/cancel` | Admin, Staff — `Draft`/`Confirmed → Cancelled` |
+| `POST` | `/invoices/:id/print` | Admin, Staff — records the print action |
+| `GET` | `/billing/pending` | Admin, Staff — due contracts, totals and auto-closes |
+| `POST` | `/billing/run-billing-day` | Admin, Staff — idempotent invoice generation |
 
 Responses use one envelope everywhere:
 
@@ -149,15 +165,15 @@ Responses use one envelope everywhere:
 server/src/
   config/      environment parsing (fails fast on missing values)
   db/          schema.sql, pool, create/init/seed scripts
-  repositories/  SQL only (products, plans, quotation templates, subscriptions, users, audit)
-  services/      business rules only
+  repositories/  SQL only (products, plans, templates, subscriptions, invoices, tax, discounts, users, audit)
+  services/      business rules only (incl. billing engine, invoice actions, discount evaluation)
   middleware/    auth, validation, errors, request logging
   routes/        HTTP surface only
-  utils/         errors, validators (auth + catalog + subscriptions), JWT, logger, response, money, params
+  utils/         errors, validators, JWT, logger, response, money, params, dates
 client/src/
-  lib/           api client, auth context, types, formatting, navigation, subscription status, hooks
-  components/    ui primitives, layout, catalog forms, subscription stepper and creation modal
-  pages/         auth screens, dashboard, products, plans, templates, subscriptions, portal
+  lib/           api client, auth context, types, formatting, navigation, status maps, hooks
+  components/    ui primitives, layout, catalog forms, billing forms, subscription stepper
+  pages/         auth screens, dashboard, catalog, subscriptions, billing day, invoices, print, portal
 ```
 
 Dependency direction is one way: `routes → services → repositories → db`. Services never build SQL, repositories never decide permissions, and routes never contain business rules.

@@ -10,7 +10,8 @@ export type AuditEntityType =
   | 'SUBSCRIPTION'
   | 'INVOICE'
   | 'PAYMENT'
-  | 'DISCOUNT';
+  | 'DISCOUNT'
+  | 'TAX_RULE';
 
 /**
  * Append-only audit trail. Failures are logged but never surface to the caller:

@@ -12,6 +12,7 @@ import type {
   SubscriptionRow,
 } from '../repositories/subscription.repository';
 import type { BillingInterval } from '../utils/catalog.validators';
+import { todayIso } from '../utils/dates';
 import { ForbiddenError, NotFoundError, ValidationError } from '../utils/errors';
 import { toAmount } from '../utils/money';
 import type {
@@ -108,14 +109,6 @@ const RENEWAL_INTERVAL: Record<BillingInterval, string> = {
   monthly: '1 month',
   yearly: '1 year',
 };
-
-/** Local calendar date as 'YYYY-MM-DD', matching how DATE columns are read back. */
-function todayIso(): string {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${now.getFullYear()}-${month}-${day}`;
-}
 
 function latestIso(left: string, right: string): string {
   return left >= right ? left : right;

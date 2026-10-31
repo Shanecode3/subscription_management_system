@@ -55,3 +55,29 @@
     @apply rounded-xl border border-slate-200 bg-white shadow-card;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Print — only the invoice sheet reaches paper. The toolbar, the app chrome
+   and the tinted page background are all removed, and the sheet loses the
+   shadow it only needs on screen.
+   --------------------------------------------------------------------------- */
+@media print {
+  @page {
+    size: A4;
+    margin: 16mm;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-sheet {
+    box-shadow: none !important;
+    border: 0 !important;
+  }
+}

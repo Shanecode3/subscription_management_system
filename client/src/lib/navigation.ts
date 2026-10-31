@@ -1,9 +1,12 @@
 import {
+  BadgePercent,
   CalendarClock,
   FileStack,
   LayoutDashboard,
   Package,
+  PlayCircle,
   ReceiptText,
+  Scale,
   ScrollText,
   type LucideIcon,
 } from 'lucide-react';
@@ -31,6 +34,10 @@ export const NAV_ITEMS: NavItem[] = [
     roles: ['ADMIN', 'STAFF'],
   },
   { to: '/subscriptions', label: 'Subscriptions', icon: FileStack, roles: ['ADMIN', 'STAFF'] },
+  { to: '/billing', label: 'Billing day', icon: PlayCircle, roles: ['ADMIN', 'STAFF'] },
+  { to: '/invoices', label: 'Invoices', icon: ReceiptText, roles: ['ADMIN', 'STAFF', 'CUSTOMER'] },
+  { to: '/discounts', label: 'Discounts', icon: BadgePercent, roles: ['ADMIN', 'STAFF'] },
+  { to: '/tax-rules', label: 'Tax rules', icon: Scale, roles: ['ADMIN', 'STAFF'] },
   { to: '/portal', label: 'My subscriptions', icon: ReceiptText, roles: ['CUSTOMER'] },
 ];
 
@@ -40,6 +47,10 @@ const PAGE_TITLES: Record<string, string> = {
   '/plans': 'Plans',
   '/templates': 'Quotation templates',
   '/subscriptions': 'Subscriptions',
+  '/billing': 'Billing day',
+  '/invoices': 'Invoices',
+  '/discounts': 'Discounts',
+  '/tax-rules': 'Tax rules',
   '/portal': 'My subscriptions',
 };
 
@@ -49,5 +60,7 @@ export function navItemsForRole(role: Role): NavItem[] {
 
 export function titleForPath(pathname: string): string {
   if (pathname.startsWith('/subscriptions/')) return 'Subscription';
+  if (pathname.startsWith('/invoices/') && pathname.endsWith('/print')) return 'Print invoice';
+  if (pathname.startsWith('/invoices/')) return 'Invoice';
   return PAGE_TITLES[pathname] ?? 'Brightloop';
 }

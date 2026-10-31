@@ -27,6 +27,8 @@ export interface SubscriptionRow extends QueryResultRow {
   expiry_date: string | null;
   payment_terms: string;
   next_billing_date: string | null;
+  discount_rule_id: number | null;
+  tax_rule_id: number | null;
   notes: string | null;
   paused_at: Date | null;
   closed_at: Date | null;
@@ -93,6 +95,7 @@ const SUBSCRIPTION_COLUMNS = `
   p.billing_interval, p.auto_close, p.allow_early_close, p.allow_pause, p.allow_renew,
   s.template_id, t.name AS template_name,
   s.status, s.start_date, s.expiry_date, s.payment_terms, s.next_billing_date,
+  s.discount_rule_id, s.tax_rule_id,
   s.notes, s.paused_at, s.closed_at, s.created_at, s.updated_at
 `;
 
@@ -348,4 +351,151 @@ export async function renewSubscription(
     [id, startDate, expiryDate, interval, paymentTerms],
   );
   return (result.rowCount ?? 0) > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Billing day
+// ---------------------------------------------------------------------------
+
+/**
+ * Every contract the billing run must consider. The partial index
+ * idx_subs_active_billing covers this predicate, so the scan cost stays flat
+ * as the subscriptions table grows.
+ */
+export async function listDueSubscriptions(): Promise<SubscriptionRow[]> {
+  const result = await query<SubscriptionRow>(
+    `SELECT ${SUBSCRIPTION_COLUMNS} ${SUBSCRIPTION_FROM}
+      WHERE s.status = 'Active'
+        AND s.next_billing_date IS NOT NULL
+        AND s.next_billing_date <= CURRENT_DATE
+      ORDER BY s.next_billing_date ASC, s.id ASC`,
+  );
+  return result.rows;
+}
+
+export interface BillingLockRow {
+  id: number;
+  subscription_number: string;
+  customer_id: number;
+  customer_name: string;
+  status: SubscriptionStatus;
+  next_billing_date: string | null;
+  expiry_date: string | null;
+  payment_terms: string;
+  discount_rule_id: number | null;
+  tax_rule_id: number | null;
+  billing_interval: BillingInterval;
+  auto_close: boolean;
+  plan_name: string;
+}
+
+/**
+ * Re-reads the row under `FOR UPDATE` inside the billing transaction. The list
+ * query that picked the candidate is unlocked, so the state could have moved on
+ * (a pause, a manual close) between selection and processing.
+ */
+export async function lockSubscriptionForBilling(
+  id: number,
+  client: PoolClient,
+): Promise<BillingLockRow | null> {
+  const result = await client.query<BillingLockRow>(
+    `SELECT s.id, s.subscription_number, s.customer_id, c.name AS customer_name,
+            s.status, s.next_billing_date, s.expiry_date, s.payment_terms,
+            s.discount_rule_id, s.tax_rule_id,
+            p.billing_interval, p.auto_close, p.name AS plan_name
+       FROM subscriptions s
+       JOIN subscription_plans p ON p.id = s.plan_id
+       JOIN users c ON c.id = s.customer_id
+      WHERE s.id = $1
+      FOR UPDATE OF s`,
+    [id],
+  );
+  return result.rows[0] ?? null;
+}
+
+const BILLING_INTERVAL_SQL: Readonly<Record<BillingInterval, string>> = {
+  daily: '1 day',
+  weekly: '7 days',
+  monthly: '1 month',
+  yearly: '1 year',
+};
+
+export function intervalSql(interval: BillingInterval): string {
+  return BILLING_INTERVAL_SQL[interval];
+}
+
+/**
+ * Moves the contract to its next cycle and records which discount (if any) the
+ * invoice consumed.
+ *
+ * The CASE guards the no-double-bill rule: if advancing one interval still
+ * lands on or before today (a contract that was dormant longer than a cycle),
+ * the date jumps to the next interval after today instead of leaving the
+ * contract due and allowing a second run to bill it again the same day.
+ */
+export async function advanceBillingCycle(
+  id: number,
+  interval: BillingInterval,
+  discountRuleId: number | null,
+  client: PoolClient,
+): Promise<string | null> {
+  const result = await client.query<{ next_billing_date: string | null }>(
+    `UPDATE subscriptions
+        SET next_billing_date = CASE
+              WHEN next_billing_date + $2::interval > CURRENT_DATE
+                THEN next_billing_date + $2::interval
+              ELSE CURRENT_DATE + $2::interval
+            END,
+            discount_rule_id = $3
+      WHERE id = $1
+      RETURNING next_billing_date`,
+    [id, intervalSql(interval), discountRuleId],
+  );
+  return result.rows[0]?.next_billing_date ?? null;
+}
+
+export interface ExpiringSubscriptionRow extends QueryResultRow {
+  id: number;
+  subscription_number: string;
+  customer_id: number;
+  expiry_date: string;
+}
+
+/** Active contracts whose plan says they close at expiry, and whose expiry has passed. */
+export async function listExpiredAutoCloseSubscriptions(
+  client?: PoolClient,
+): Promise<ExpiringSubscriptionRow[]> {
+  const sql = `
+    SELECT s.id, s.subscription_number, s.customer_id, s.expiry_date
+      FROM subscriptions s
+      JOIN subscription_plans p ON p.id = s.plan_id
+     WHERE s.status = 'Active'
+       AND p.auto_close = TRUE
+       AND s.expiry_date IS NOT NULL
+       AND s.expiry_date < CURRENT_DATE
+     ORDER BY s.expiry_date ASC, s.id ASC
+  `;
+  const result = client ? await client.query<ExpiringSubscriptionRow>(sql) : await query<ExpiringSubscriptionRow>(sql);
+  return result.rows;
+}
+
+/**
+ * Closes every contract past its auto-close date in one statement. RETURNING
+ * gives the run an audit trail without a second SELECT.
+ */
+export async function closeExpiredAutoCloseSubscriptions(
+  client: PoolClient,
+): Promise<ExpiringSubscriptionRow[]> {
+  const result = await client.query<ExpiringSubscriptionRow>(
+    `UPDATE subscriptions s
+        SET status = 'Closed', closed_at = CURRENT_TIMESTAMP
+       FROM subscription_plans p
+      WHERE p.id = s.plan_id
+        AND s.status = 'Active'
+        AND p.auto_close = TRUE
+        AND s.expiry_date IS NOT NULL
+        AND s.expiry_date < CURRENT_DATE
+      RETURNING s.id, s.subscription_number, s.customer_id, s.expiry_date`,
+  );
+  return result.rows;
 }
