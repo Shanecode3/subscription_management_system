@@ -4,10 +4,6 @@ A complete subscription management system for a fictional software house, **Brig
 
 **Stack:** PostgreSQL 18 · Node.js + TypeScript + Express 4 · React 18 + Vite + Tailwind CSS
 
-> Everything runs locally. There is no BaaS, no cloud database and no third-party billing, tax or payment API — every figure on screen is read from or written to the local PostgreSQL database, and every rule (subscriptions, taxes, discounts, invoicing, reporting) is implemented in this repository.
-
-**Built for Odoo × Make-A-Ton 9.0.**
-
 ---
 
 ## Contents
