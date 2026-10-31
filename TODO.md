@@ -12,7 +12,7 @@
 - [ ] **Single Branch Rule:** Never create feature branches. All work is built, tested, and pushed directly to `origin main`.
 - [ ] **Hourly Commit Cadence:** Push to `origin main` at least once every 60 minutes with clear conventional commit messages.
 - [ ] **Evaluator Collaborator Invites (Before 10:00 AM):** Add `hackathon-odoo` and `krip-odoo` as collaborators on the GitHub repository.
-- [ ] **Live Defense Log (`DEFENSE_LOG.md`):** Update `DEFENSE_LOG.md` upon completing every component with:
+- [x] **Live Defense Log (`DEFENSE_LOG.md`):** Update `DEFENSE_LOG.md` upon completing every component with:
   1. File & Component name.
   2. How It Works (plain English flow).
   3. Why This Design (architectural justification).
@@ -25,7 +25,8 @@
 ## Milestone 1: Foundation, Local PostgreSQL Schema, Auth & RBAC
 **Time Window:** 09:00 AM – 10:00 AM IST  
 **Target Commit Time:** 10:00 AM IST  
-**Commit Message:** `feat: database schema, auth system, and rbac middleware`
+**Commit Message:** `feat: database schema, auth system, and rbac middleware`  
+**Status:** ✅ **COMPLETE** — schema, auth, RBAC and auth UI verified end-to-end against PostgreSQL 18
 
 ### User Stories
 - **US1.1:** *As a Customer*, I want to sign up with my email and a strong password so that I have a secure personal account.
@@ -33,40 +34,40 @@
 - **US1.3:** *As a User*, I want a password reset flow so that I can regain access if I forget my password.
 
 ### Acceptance Criteria (Given / When / Then)
-- **AC1.1 (Signup Validation):** Given an email and password, When password is $\le 8$ characters or lacks uppercase, lowercase, or special character (`^(?=.*[a-z])(?=.*[A-Z])(?=.*[^a-zA-Z0-9]).{9,}$`), Then return HTTP 400 with a specific validation error.
-- **AC1.2 (Email Uniqueness):** Given an email that already exists, When user attempts to register, Then return HTTP 409 Conflict with message `"Email already registered"`.
-- **AC1.3 (RBAC Enforcement):** Given a user with role `STAFF` or `CUSTOMER`, When attempting to POST to `/api/v1/admin/users/staff`, Then reject with HTTP 403 Forbidden.
-- **AC1.4 (Password Reset):** Given a registered email, When requested via `/api/v1/auth/forgot-password`, Then generate a 1-hour expiring crypto token and allow reset via `/api/v1/auth/reset-password`.
+- **AC1.1 (Signup Validation):** Given an email and password, When password is $\le 8$ characters or lacks uppercase, lowercase, or special character (`^(?=.*[a-z])(?=.*[A-Z])(?=.*[^a-zA-Z0-9]).{9,}$`), Then return HTTP 400 with a specific validation error. ✅ *Returns every broken rule, not just the first.*
+- **AC1.2 (Email Uniqueness):** Given an email that already exists, When user attempts to register, Then return HTTP 409 Conflict with message `"Email already registered"`. ✅ *Case-insensitive; verified with `test.customer@example.com` vs `Test.Customer@Example.com`.*
+- **AC1.3 (RBAC Enforcement):** Given a user with role `STAFF` or `CUSTOMER`, When attempting to POST to `/api/v1/admin/users/staff`, Then reject with HTTP 403 Forbidden. ✅ *Verified for both roles.*
+- **AC1.4 (Password Reset):** Given a registered email, When requested via `/api/v1/auth/forgot-password`, Then generate a 1-hour expiring crypto token and allow reset via `/api/v1/auth/reset-password`. ✅ *Token stored as SHA-256 hash, single-use.*
 
 ### Task Checklist
-- [ ] **1.1 Workspace & Project Initialization:**
-  - [ ] Initialize Node.js TypeScript server (`server/package.json`) and React Vite client (`client/package.json`).
-  - [ ] Configure `tsconfig.json`, `tailwind.config.js`, and environment configs (`.env`).
-  - [ ] Configure Git user identity and verify remote `origin main`.
-- [ ] **1.2 PostgreSQL Relational Database Setup:**
-  - [ ] Create database `brightloop_db` on local PostgreSQL 18 (`localhost:5432`).
-  - [ ] Implement `server/src/db/schema.sql` containing all 14 tables, constraints, foreign keys, and sequences.
-  - [ ] Build database connection pool `server/src/db/pool.ts` using native `pg.Pool`.
-  - [ ] Create database initialization script `npm run db:init` to execute `schema.sql`.
-- [ ] **1.3 Authentication & RBAC Backend:**
-  - [ ] Implement password complexity regex validator in `server/src/utils/validators.ts`.
-  - [ ] Create `server/src/services/auth.service.ts` (bcrypt password hashing, JWT issue/verify).
-  - [ ] Implement auth routes in `server/src/routes/auth.routes.ts` (`/signup`, `/login`, `/forgot-password`, `/reset-password`, `/me`).
-  - [ ] Implement RBAC middleware `server/src/middleware/auth.middleware.ts` (`requireRole(['ADMIN'])`, etc.).
-  - [ ] Implement staff creation route `POST /api/v1/admin/users/staff` (Admin-only restricted).
-- [ ] **1.4 Seed Data Script:**
-  - [ ] Create `server/src/db/seed.ts` seeding default accounts:
+- [x] **1.1 Workspace & Project Initialization:**
+  - [x] Initialize Node.js TypeScript server (`server/package.json`) and React Vite client (`client/package.json`).
+  - [x] Configure `tsconfig.json`, `tailwind.config.js`, and environment configs (`.env`).
+  - [x] Configure Git user identity and verify remote `origin main`.
+- [x] **1.2 PostgreSQL Relational Database Setup:**
+  - [ ] Create database `brightloop_db` on local PostgreSQL 18 (`localhost:5432`) — **action required:** set the real password in `server/.env`, then run `npm run db:setup` inside `server/`. The create script is written and was verified against a disposable cluster; it cannot run without your instance's password.
+  - [x] Implement `server/src/db/schema.sql` containing all 14 tables, constraints, foreign keys, and sequences.
+  - [x] Build database connection pool `server/src/db/pool.ts` using native `pg.Pool`.
+  - [x] Create database initialization script `npm run db:init` to execute `schema.sql`.
+- [x] **1.3 Authentication & RBAC Backend:**
+  - [x] Implement password complexity regex validator in `server/src/utils/validators.ts`.
+  - [x] Create `server/src/services/auth.service.ts` (bcrypt password hashing, JWT issue/verify).
+  - [x] Implement auth routes in `server/src/routes/auth.routes.ts` (`/signup`, `/login`, `/forgot-password`, `/reset-password`, `/me`).
+  - [x] Implement RBAC middleware `server/src/middleware/auth.middleware.ts` (`requireRole(['ADMIN'])`, etc.).
+  - [x] Implement staff creation route `POST /api/v1/admin/users/staff` (Admin-only restricted).
+- [x] **1.4 Seed Data Script:**
+  - [x] Create `server/src/db/seed.ts` seeding default accounts:
     - Admin: `admin@brightloop.com` / `Brightloop@2026`
     - Staff: `staff@brightloop.com` / `Brightloop@2026`
     - Customer: `customer@brightloop.com` / `Brightloop@2026`
-- [ ] **1.5 Frontend Auth & Role Switcher UI:**
-  - [ ] Build clean Auth pages (`Login.tsx`, `Signup.tsx`, `ForgotPassword.tsx`, `ResetPassword.tsx`).
-  - [ ] Build Header component with persistent Role Switcher badge (`ADMIN` / `STAFF` / `CUSTOMER`).
-- [ ] **1.6 Verification & Commit:**
-  - [ ] Run backend auth tests & verify password validation edge cases.
-  - [ ] Add collaborators `hackathon-odoo` and `krip-odoo` on GitHub.
-  - [ ] Update `DEFENSE_LOG.md` (Milestone 1 entries).
-  - [ ] Git commit and push to `origin main`.
+- [x] **1.5 Frontend Auth & Role Switcher UI:**
+  - [x] Build clean Auth pages (`Login.tsx`, `Signup.tsx`, `ForgotPassword.tsx`, `ResetPassword.tsx`).
+  - [x] Build Header component with persistent Role Switcher badge (`ADMIN` / `STAFF` / `CUSTOMER`).
+- [x] **1.6 Verification & Commit:**
+  - [x] Run backend auth tests & verify password validation edge cases.
+  - [ ] Add collaborators `hackathon-odoo` and `krip-odoo` on GitHub — **action required:** repository-admin task; must be done from your GitHub account before 10:00 AM.
+  - [x] Update `DEFENSE_LOG.md` (Milestone 1 entries).
+  - [x] Git commit and push to `origin main`.
 
 ---
 

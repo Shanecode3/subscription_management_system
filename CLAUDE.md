@@ -6,7 +6,7 @@
 
 * **Hourly Commit Cadence:** Code must be pushed to `origin main` at least once every 60 minutes with clear, descriptive conventional commit messages (`feat:`, `fix:`, `refactor:`) explaining what was implemented.
 
-* **Git Identity Matching:** All commits must use the participant's registered GitHub username and email so the portal's automated Q&A bot maps commits to the profile.
+* **Git Identity Matching:** All commits must use the participant's registered GitHub username and email so the portal's automated Q&A bot maps commits to the profile. Never include "Co-Authored-By", "Generated with Claude Code", or any AI attribution trailers in git commit messages.
 
 * **Collaborators (Before 10:00 AM):** Add `hackathon-odoo` and `krip-odoo` (Evaluator: Krishna Patel, `krip@odoo.com`) as collaborators on the public GitHub repository.
 
