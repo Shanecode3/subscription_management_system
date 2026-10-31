@@ -90,8 +90,14 @@ const ACTION_STATES: Record<InvoiceAction, InvoiceStatus[]> = {
 
 const ACTION_ORDER: InvoiceAction[] = ['confirm', 'send', 'cancel', 'print'];
 
-export function allowedActionsFor(status: InvoiceStatus): InvoiceAction[] {
-  return ACTION_ORDER.filter((action) => ACTION_STATES[action].includes(status));
+export function allowedActionsFor(status: InvoiceStatus, amountPaid = 0): InvoiceAction[] {
+  return ACTION_ORDER.filter((action) => {
+    if (!ACTION_STATES[action].includes(status)) return false;
+    // Cancelling abandons the receivable; once money has been recorded the
+    // invoice has to be reversed, not cancelled, so the action is not offered.
+    if (action === 'cancel' && amountPaid > 0) return false;
+    return true;
+  });
 }
 
 const ACTION_MESSAGE: Record<InvoiceAction, string> = {
@@ -172,7 +178,7 @@ export function toInvoiceDto(
     sentAt: row.sent_at ? row.sent_at.toISOString() : null,
     cancelledAt: row.cancelled_at ? row.cancelled_at.toISOString() : null,
     notes: row.notes,
-    allowedActions: allowedActionsFor(row.status),
+    allowedActions: allowedActionsFor(row.status, amountPaid),
     lines: lines.map(toLineDto),
     payments,
     createdAt: row.created_at.toISOString(),

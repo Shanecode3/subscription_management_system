@@ -103,9 +103,11 @@ const INVOICE_COLUMNS = `
   i.billing_cycle_date, i.billing_cycle_key, i.status, i.issue_date, i.due_date,
   i.subtotal, i.tax_total, i.discount_total, i.total_amount, i.amount_paid,
   i.sent_at, i.cancelled_at, i.notes, i.created_at, i.updated_at,
-  (i.status IN ('Draft', 'Confirmed') AND i.due_date < CURRENT_DATE) AS is_overdue,
+  -- A Draft has not been sent, so it cannot be overdue. This matches
+  -- listOverdueInvoices() and the finance dashboard, which both ignore drafts.
+  (i.status = 'Confirmed' AND i.due_date < CURRENT_DATE) AS is_overdue,
   CASE
-    WHEN i.status IN ('Draft', 'Confirmed') AND i.due_date < CURRENT_DATE
+    WHEN i.status = 'Confirmed' AND i.due_date < CURRENT_DATE
     THEN (CURRENT_DATE - i.due_date)
     ELSE 0
   END AS days_overdue

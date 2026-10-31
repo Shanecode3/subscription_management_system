@@ -13,6 +13,7 @@
     "db:init": "tsx src/db/init.ts",
     "db:seed": "npm run db:init && tsx src/db/seed.ts",
     "db:seed:perf": "npm run db:init && tsx src/db/seed_performance.ts",
+    "db:demo": "npm run db:init && tsx src/db/seed_demo.ts",
     "db:setup": "npm run db:create && npm run db:init && npm run db:seed"
   },
   "dependencies": {

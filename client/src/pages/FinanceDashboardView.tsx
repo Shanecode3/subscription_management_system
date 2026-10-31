@@ -469,8 +469,15 @@ export function FinanceDashboardView() {
               currentActiveCount={dashboard.activeSubscriptions}
             />
 
-            {/* Overdue Chase List */}
-            <section id="overdue-chase" className="card overflow-hidden" aria-label="Overdue invoices">
+            {/* Overdue Chase List. `contain-paint` keeps the 860px-wide ledger
+                inside its own horizontal scroller; without it Chromium lets the
+                table's min-width widen the document and the whole page scrolls
+                sideways on a phone. */}
+            <section
+              id="overdue-chase"
+              className="card overflow-hidden [contain:paint]"
+              aria-label="Overdue invoices"
+            >
               <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-5 py-4">
                 <div>
                   <h2 className="text-base font-semibold text-ink">Collections chase list</h2>

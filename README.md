@@ -90,6 +90,7 @@ These are local seed accounts for evaluation only.
 | `npm run db:init` | Apply `src/db/schema.sql` (idempotent) |
 | `npm run db:seed` | Re-apply the schema, then seed the three demo accounts, the catalogue (products + variants), the plans, the quotation templates and, when none exist yet, two demo subscriptions |
 | `npm run db:seed:perf` | Re-apply the schema, then generate the performance dataset (140 customers, 1,050 subscriptions, 2,700 invoices, 1,847 payments), benchmark the dashboard SQL with `EXPLAIN ANALYZE`; add `-- --reset` to rebuild it |
+| `npm run db:demo` | Rebuild the database with the demo dataset: four customers, nine contracts across every lifecycle state, sixteen invoices with payments, one overdue balance and one contract due for the live Billing Day run (password `Brightloop@2026` for every account) |
 | `npm run db:setup` | All three of the above, in order |
 
 ---
@@ -190,5 +191,3 @@ Dependency direction is one way: `routes → services → repositories → db`. 
 ## Documentation
 
 - `DEFENSE_LOG.md` — every table, route, middleware module and screen, with design rationale and prepared evaluator Q&A.
-- `SPEC.md` — full architecture and schema specification.
-- `TODO.md` — milestone roadmap.

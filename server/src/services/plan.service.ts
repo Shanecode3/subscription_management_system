@@ -155,6 +155,9 @@ export async function updatePlan(
   if (input.allowEarlyClose !== undefined) patch.allowEarlyClose = input.allowEarlyClose;
   if (input.allowPause !== undefined) patch.allowPause = input.allowPause;
   if (input.allowRenew !== undefined) patch.allowRenew = input.allowRenew;
+  // Restoring a retired plan is a PATCH of the same flag the DELETE cleared,
+  // so the plan screen has one affordance per direction.
+  if (input.isActive !== undefined) patch.isActive = input.isActive;
 
   return withTransaction(async (client) => {
     const updated = await planRepository.updatePlan(id, patch, client);

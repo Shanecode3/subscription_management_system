@@ -89,6 +89,8 @@ const planShape = z
     allowEarlyClose: booleanField('Allow early close').optional(),
     allowPause: booleanField('Allow pause').optional(),
     allowRenew: booleanField('Allow renew').optional(),
+    // Retiring is a DELETE; restoring is the same field set back to true.
+    isActive: booleanField('Active').optional(),
   })
   .strict();
 

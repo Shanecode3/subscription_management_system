@@ -389,7 +389,10 @@ export async function updateDiscountRule(
     }
     if (input.scope !== undefined) patch.targetProductId = null;
   } else {
-    const targetChanged = input.targetProductId !== undefined || input.scope !== undefined;
+    const targetChanged =
+      (input.targetProductId !== undefined &&
+        input.targetProductId !== existing.target_product_id) ||
+      (input.scope !== undefined && input.scope !== existing.scope);
     const targetProductId =
       input.targetProductId !== undefined ? input.targetProductId : existing.target_product_id;
     if (targetProductId == null) {
@@ -401,6 +404,15 @@ export async function updateDiscountRule(
       await assertProductUsable(targetProductId);
       patch.targetProductId = targetProductId;
     }
+  }
+
+  // A body whose only key normalises away (for example targetProductId: null
+  // on a whole-subscription rule) would otherwise reach the repository as an
+  // empty SET clause and surface as a 500.
+  if (Object.keys(patch).length === 0) {
+    throw new ValidationError('Provide at least one field to update.', [
+      { field: 'name', message: 'Nothing in this request would change the rule.' },
+    ]);
   }
 
   return withTransaction(async (client) => {

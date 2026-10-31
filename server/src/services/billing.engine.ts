@@ -221,13 +221,19 @@ export async function previewBillingDay(): Promise<BillingPreviewDto> {
     listApplicableDiscounts(),
   ]);
 
+  // Pass 1 of the run closes expired auto-close contracts before it looks for
+  // due ones, so those contracts will never be invoiced. Counting them here
+  // would promise invoices the run does not create.
+  const closingIds = new Set(expiredRows.map((row) => row.id));
+  const billableDueRows = dueRows.filter((row) => !closingIds.has(row.id));
+
   const lines = await subscriptionRepository.listLinesForSubscriptions(
-    dueRows.map((row) => row.id),
+    billableDueRows.map((row) => row.id),
   );
   const linesBySubscription = groupLinesBySubscription(lines);
   const { byId, defaultRule } = indexTaxRules(taxRows);
 
-  const items: BillingDueItemDto[] = dueRows.map((row) => {
+  const items: BillingDueItemDto[] = billableDueRows.map((row) => {
     const billable = billableLines(linesBySubscription.get(row.id) ?? []);
     const lineInputs = discountLineInputs(billable);
     const best = billable.length > 0 ? rankApplicableDiscounts(candidateRules, lineInputs)[0] : undefined;

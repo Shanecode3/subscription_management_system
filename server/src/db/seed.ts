@@ -575,7 +575,11 @@ async function seedSubscriptions(): Promise<number> {
   return 2;
 }
 
-async function main(): Promise<void> {
+/**
+ * Accounts and catalogue only: the demo seeder builds its own contract set and
+ * calls this first, while `npm run db:seed` uses `seedAll` below.
+ */
+export async function seedCatalogue(): Promise<void> {
   const newAccounts = await seedAccounts();
 
   for (const product of SEED_PRODUCTS) await ensureProduct(product);
@@ -595,8 +599,6 @@ async function main(): Promise<void> {
   for (const rule of SEED_DISCOUNT_RULES) {
     if (await ensureDiscountRule(rule)) newDiscountRules += 1;
   }
-
-  const newSubscriptions = await seedSubscriptions();
 
   const counts = await pool.query<{
     users: string;
@@ -625,9 +627,8 @@ async function main(): Promise<void> {
 
   const row = counts.rows[0]!;
   logger.info(
-    `Seed complete: ${newAccounts} new account(s), ${newTemplates} new template(s), ` +
-      `${newTaxRules} new tax rule(s), ${newDiscountRules} new discount(s), ` +
-      `${newSubscriptions} new subscription(s).`,
+    `Catalogue seeded: ${newAccounts} new account(s), ${newTemplates} new template(s), ` +
+      `${newTaxRules} new tax rule(s), ${newDiscountRules} new discount(s).`,
   );
 
   console.log('Demo accounts (password for all three): ' + SEED_PASSWORD);
@@ -647,9 +648,17 @@ async function main(): Promise<void> {
   );
 }
 
-main()
-  .catch((error: unknown) => {
-    logger.error('Seeding failed', error instanceof Error ? error.message : error);
-    process.exitCode = 1;
-  })
-  .finally(() => closePool());
+/** `npm run db:seed`: catalogue plus the two starter contracts. */
+export async function seedAll(): Promise<void> {
+  await seedCatalogue();
+  await seedSubscriptions();
+}
+
+if (require.main === module) {
+  seedAll()
+    .catch((error: unknown) => {
+      logger.error('Seeding failed', error instanceof Error ? error.message : error);
+      process.exitCode = 1;
+    })
+    .finally(() => closePool());
+}

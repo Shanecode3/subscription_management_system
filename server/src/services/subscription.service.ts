@@ -123,7 +123,11 @@ function flagViolation(row: SubscriptionRow, next: SubscriptionStatus): string |
   if (
     next === 'Closed' &&
     (row.status === 'Active' || row.status === 'Paused') &&
-    !row.allow_early_close
+    !row.allow_early_close &&
+    // Closing after the term has run out is not "early", it is simply the end
+    // of the contract — otherwise a plan without early close could never be
+    // terminated once its expiry date passed.
+    (row.expiry_date === null || row.expiry_date > todayIso())
   ) {
     return `The ${row.plan_name} plan does not allow early closure.`;
   }
@@ -644,32 +648,48 @@ export async function transitionStatus(
   });
 }
 
-async function performLifecycle(
-  id: number,
-  next: SubscriptionStatus,
-  requester: Requester,
-  reason: string | undefined,
-): Promise<SubscriptionDto> {
-  return withTransaction(async (client) => {
-    const row = await loadForAction(id, requester, client);
-    return applyTransition(row, next, requester, client, { reason });
-  });
-}
-
 export function pauseSubscription(
   id: number,
   requester: Requester,
   reason?: string,
 ): Promise<SubscriptionDto> {
-  return performLifecycle(id, 'Paused', requester, reason);
+  return withTransaction(async (client) => {
+    const row = await loadForAction(id, requester, client);
+    if (row.status !== 'Active') {
+      const message = `Only an active subscription can be paused; this one is ${row.status}.`;
+      throw new ValidationError(message, [{ field: 'status', message }]);
+    }
+    return applyTransition(row, 'Paused', requester, client, { reason });
+  });
 }
 
+/**
+ * Resuming is strictly the inverse of pausing. A Closed contract is reopened
+ * with Renew, which writes a new term and a fresh billing date; letting Resume
+ * reach the same transition would silently start a period nobody agreed to and
+ * would log it as a status change rather than a renewal.
+ */
 export function resumeSubscription(
   id: number,
   requester: Requester,
   reason?: string,
 ): Promise<SubscriptionDto> {
-  return performLifecycle(id, 'Active', requester, reason);
+  return withTransaction(async (client) => {
+    const row = await loadForAction(id, requester, client);
+    if (row.status !== 'Paused') {
+      const message = `Only a paused subscription can be resumed; this one is ${row.status}.`;
+      throw new ValidationError(message, [
+        {
+          field: 'status',
+          message:
+            row.status === 'Closed'
+              ? 'This contract is closed — renew it to start a new period.'
+              : message,
+        },
+      ]);
+    }
+    return applyTransition(row, 'Active', requester, client, { reason });
+  });
 }
 
 /**

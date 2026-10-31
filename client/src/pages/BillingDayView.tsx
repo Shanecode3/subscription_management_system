@@ -75,7 +75,10 @@ export function BillingDayView() {
               className="w-auto"
               variant="teal"
               onClick={() => setIsConfirmOpen(true)}
-              disabled={isRunning || (preview?.dueCount ?? 0) === 0}
+              disabled={
+                isRunning ||
+                ((preview?.dueCount ?? 0) === 0 && (preview?.closingCount ?? 0) === 0)
+              }
               isLoading={isRunning}
             >
               <Play className="h-4 w-4" aria-hidden="true" />
@@ -396,7 +399,9 @@ export function BillingDayView() {
               Not yet
             </Button>
             <Button type="button" variant="teal" className="w-auto" onClick={runBillingDay}>
-              Generate {preview?.dueCount ?? 0} invoice{(preview?.dueCount ?? 0) === 1 ? '' : 's'}
+              {(preview?.dueCount ?? 0) === 0
+                ? `Close ${preview?.closingCount ?? 0} expired`
+                : `Generate ${preview?.dueCount ?? 0} invoice${(preview?.dueCount ?? 0) === 1 ? '' : 's'}`}
             </Button>
           </div>
         }
