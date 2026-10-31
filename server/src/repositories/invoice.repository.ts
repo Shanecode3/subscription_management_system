@@ -185,6 +185,34 @@ export async function listInvoices(filter: InvoiceFilter): Promise<InvoiceRow[]>
   return result.rows;
 }
 
+/**
+ * Invoices a finance lead has to chase: confirmed, unpaid, and past their due
+ * date. Drafts are excluded because nothing has been sent to the customer yet —
+ * a customer cannot be in arrears on a document they have never seen.
+ */
+export async function listOverdueInvoices(
+  customerId?: number,
+  limit = 100,
+): Promise<InvoiceRow[]> {
+  const values: unknown[] = [];
+  const conditions = [`i.status = 'Confirmed'`, `i.due_date < CURRENT_DATE`];
+
+  if (customerId !== undefined) {
+    values.push(customerId);
+    conditions.push(`i.customer_id = $${values.length}`);
+  }
+  values.push(limit);
+
+  const result = await query<InvoiceRow>(
+    `SELECT ${INVOICE_COLUMNS} ${INVOICE_FROM}
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY i.due_date ASC, i.id ASC
+      LIMIT $${values.length}`,
+    values,
+  );
+  return result.rows;
+}
+
 export async function findInvoiceById(
   id: number,
   client?: PoolClient,
@@ -222,6 +250,41 @@ export async function lockInvoice(
     [id],
   );
   return result.rows[0] ?? null;
+}
+
+/**
+ * The reconciliation step. One statement both credits the ledger and moves the
+ * invoice to `Paid` the moment the balance reaches zero, so the two figures can
+ * never disagree. PostgreSQL evaluates every SET expression against the old row,
+ * so `amount_paid + $2` in the CASE reads the pre-payment balance, which is what
+ * makes a single statement sufficient.
+ */
+export async function applyPayment(
+  id: number,
+  amount: number,
+  client: PoolClient,
+): Promise<{ amount_paid: string; total_amount: string; status: InvoiceStatus }> {
+  const result = await client.query<{
+    amount_paid: string;
+    total_amount: string;
+    status: InvoiceStatus;
+  }>(
+    `UPDATE invoices
+        SET amount_paid = amount_paid + $2,
+            status = CASE
+                       WHEN status = 'Cancelled' THEN status
+                       WHEN amount_paid + $2 >= total_amount THEN 'Paid'
+                       ELSE status
+                     END,
+            updated_at = NOW()
+      WHERE id = $1
+      RETURNING amount_paid, total_amount, status`,
+    [id, amount],
+  );
+
+  const row = result.rows[0];
+  if (!row) throw new Error('Payment reconciliation returned no invoice row.');
+  return row;
 }
 
 /**

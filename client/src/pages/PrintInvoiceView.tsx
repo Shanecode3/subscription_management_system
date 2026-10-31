@@ -251,6 +251,42 @@ export function PrintInvoiceView() {
             </dl>
           </section>
 
+          {invoice.payments.length > 0 ? (
+            <section className="mt-8" aria-label="Payments received">
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                Payments received
+              </p>
+              <table className="mt-2 w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-y border-slate-300 text-left text-xs font-semibold text-slate-600">
+                    <th scope="col" className="py-2 pr-3">Payment</th>
+                    <th scope="col" className="px-2 py-2">Date</th>
+                    <th scope="col" className="px-2 py-2">Method</th>
+                    <th scope="col" className="px-2 py-2">Reference</th>
+                    <th scope="col" className="py-2 pl-3 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoice.payments.map((payment) => (
+                    <tr key={payment.id} className="border-b border-slate-200">
+                      <td className="py-2 pr-3 tabular-nums text-ink">{payment.paymentNumber}</td>
+                      <td className="px-2 py-2 tabular-nums text-slate-700">
+                        {formatDate(payment.date)}
+                      </td>
+                      <td className="px-2 py-2 text-slate-700">{payment.method}</td>
+                      <td className="px-2 py-2 text-slate-600">
+                        {payment.note ?? '—'}
+                      </td>
+                      <td className="py-2 pl-3 text-right font-semibold tabular-nums text-ink">
+                        {formatMoney(payment.amount)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          ) : null}
+
           <footer className="mt-10 border-t border-slate-200 pt-4 text-xs leading-relaxed text-slate-500">
             <p>
               Payment terms: {invoice.paymentTerms}. Please quote {invoice.invoiceNumber} with your

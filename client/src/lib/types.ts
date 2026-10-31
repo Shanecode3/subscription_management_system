@@ -224,6 +224,40 @@ export interface DiscountRule {
 export type InvoiceStatus = 'Draft' | 'Confirmed' | 'Paid' | 'Cancelled';
 export type InvoiceAction = 'confirm' | 'cancel' | 'send' | 'print';
 
+export type PaymentMethod = 'Bank Transfer' | 'Credit Card' | 'UPI' | 'Cash';
+
+export interface Payment {
+  id: number;
+  paymentNumber: string;
+  invoiceId: number;
+  invoiceNumber: string;
+  customerId: number;
+  customerName: string;
+  amount: number;
+  method: PaymentMethod;
+  date: string;
+  note: string | null;
+  recordedBy: number;
+  recordedByName: string;
+  createdAt: string;
+}
+
+/** What the invoice looks like immediately after a payment was recorded. */
+export interface PaymentReconciliation {
+  invoiceId: number;
+  invoiceNumber: string;
+  status: InvoiceStatus;
+  totalAmount: number;
+  amountPaid: number;
+  balanceDue: number;
+  fullyPaid: boolean;
+}
+
+export interface RecordPaymentResult {
+  payment: Payment;
+  reconciliation: PaymentReconciliation;
+}
+
 export interface InvoiceLine {
   id: number;
   productId: number;
@@ -271,6 +305,7 @@ export interface Invoice {
   notes: string | null;
   allowedActions: InvoiceAction[];
   lines: InvoiceLine[];
+  payments: Payment[];
   createdAt: string;
   updatedAt: string;
 }

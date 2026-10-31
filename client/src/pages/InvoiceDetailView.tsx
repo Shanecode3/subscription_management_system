@@ -1,6 +1,7 @@
-import { ArrowLeft, CheckCircle2, Printer, Send, XCircle } from 'lucide-react';
+import { ArrowLeft, Banknote, CheckCircle2, Printer, Send, XCircle } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { PaymentFormModal } from '../components/billing/PaymentFormModal';
 import { AppShell } from '../components/layout/AppShell';
 import { Alert } from '../components/ui/Alert';
 import { Badge } from '../components/ui/Badge';
@@ -11,7 +12,8 @@ import { ApiError, apiRequest } from '../lib/api';
 import { useAuth } from '../lib/auth-context';
 import { formatDate, formatMoney } from '../lib/format';
 import { INVOICE_ACTION_LABEL, INVOICE_TONE } from '../lib/invoice-status';
-import type { Invoice, InvoiceAction } from '../lib/types';
+import { PAYMENT_METHOD_TONE } from '../lib/payment-method';
+import type { Invoice, InvoiceAction, RecordPaymentResult } from '../lib/types';
 import { useApiResource } from '../lib/use-api-resource';
 
 /** One icon per action keeps the toolbar scannable without extra labels. */
@@ -40,6 +42,7 @@ export function InvoiceDetailView() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [isCancelOpen, setIsCancelOpen] = useState(false);
+  const [isPaymentOpen, setIsPaymentOpen] = useState(false);
 
   const invoice = data;
 
@@ -87,6 +90,18 @@ export function InvoiceDetailView() {
     }
   };
 
+  /**
+   * The payment response is a reconciliation summary, not a whole invoice, so
+   * the page refetches: that keeps `allowedActions`, the balance and the history
+   * in step with the database rather than with a client-side guess.
+   */
+  const handlePaymentRecorded = (result: RecordPaymentResult, message: string | undefined) => {
+    setIsPaymentOpen(false);
+    setActionError(null);
+    setActionMessage(message ?? `Payment ${result.payment.paymentNumber} recorded.`);
+    reload();
+  };
+
   return (
     <AppShell>
       <div className="space-y-6">
@@ -98,7 +113,7 @@ export function InvoiceDetailView() {
           All invoices
         </Link>
 
-        {isLoading ? (
+        {isLoading && !invoice ? (
           <div className="space-y-4">
             <div className="h-28 animate-pulse rounded-xl bg-slate-100" />
             <div className="h-80 animate-pulse rounded-xl bg-slate-100" />
@@ -119,6 +134,16 @@ export function InvoiceDetailView() {
               description={`${invoice.customerName} · ${invoice.subscriptionNumber} · ${invoice.planName}`}
               action={
                 <div className="flex flex-wrap items-center gap-2">
+                  {isInternal && invoice.status === 'Confirmed' && invoice.balanceDue > 0 ? (
+                    <Button
+                      variant="teal"
+                      className="w-auto"
+                      onClick={() => setIsPaymentOpen(true)}
+                    >
+                      <Banknote className="h-4 w-4" aria-hidden="true" />
+                      Record payment
+                    </Button>
+                  ) : null}
                   {invoice.allowedActions.map((action) => {
                     if (action !== 'print' && !isInternal) return null;
                     const Icon = ACTION_ICON[action];
@@ -325,6 +350,66 @@ export function InvoiceDetailView() {
               </div>
             </section>
 
+            <section className="card overflow-hidden" aria-label="Payment history">
+              <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+                <h2 className="text-sm font-semibold text-ink">Payments</h2>
+                <p className="text-xs text-slate-500">
+                  {invoice.payments.length === 0
+                    ? 'Nothing received yet'
+                    : `${invoice.payments.length} payment${invoice.payments.length === 1 ? '' : 's'} · ${formatMoney(invoice.amountPaid)} received`}
+                </p>
+              </div>
+
+              {invoice.payments.length === 0 ? (
+                <p className="px-5 py-6 text-sm text-slate-500">
+                  No payment has been recorded against this invoice.
+                  {isInternal && invoice.status === 'Confirmed'
+                    ? ' Use Record payment when the money arrives.'
+                    : ''}
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[720px] text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-left text-xs font-semibold text-slate-500">
+                        <th scope="col" className="px-5 py-2.5">Payment</th>
+                        <th scope="col" className="px-3 py-2.5">Date</th>
+                        <th scope="col" className="px-3 py-2.5">Method</th>
+                        <th scope="col" className="px-3 py-2.5">Reference</th>
+                        <th scope="col" className="px-5 py-2.5 text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {invoice.payments.map((payment) => (
+                        <tr key={payment.id}>
+                          <td className="px-5 py-3">
+                            <p className="font-semibold text-ink">{payment.paymentNumber}</p>
+                            <p className="text-xs text-slate-500">
+                              Recorded by {payment.recordedByName}
+                            </p>
+                          </td>
+                          <td className="px-3 py-3 tabular-nums text-slate-600">
+                            {formatDate(payment.date)}
+                          </td>
+                          <td className="px-3 py-3">
+                            <Badge tone={PAYMENT_METHOD_TONE[payment.method]}>
+                              {payment.method}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-3 text-slate-600">
+                            {payment.note ?? <span className="text-slate-400">—</span>}
+                          </td>
+                          <td className="px-5 py-3 text-right font-semibold tabular-nums text-emerald-700">
+                            {formatMoney(payment.amount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
             {invoice.notes ? (
               <section className="card p-5" aria-label="Invoice notes">
                 <h2 className="text-sm font-semibold text-ink">Notes</h2>
@@ -367,6 +452,15 @@ export function InvoiceDetailView() {
           subscription.
         </p>
       </Modal>
+
+      {invoice ? (
+        <PaymentFormModal
+          open={isPaymentOpen}
+          invoice={invoice}
+          onClose={() => setIsPaymentOpen(false)}
+          onRecorded={handlePaymentRecorded}
+        />
+      ) : null}
     </AppShell>
   );
 }

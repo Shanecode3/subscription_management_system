@@ -8,12 +8,21 @@ import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SelectField } from '../components/ui/SelectField';
+import { cx } from '../lib/cx';
 import { formatDate, formatMoney } from '../lib/format';
 import { INVOICE_TONE } from '../lib/invoice-status';
 import type { Invoice, InvoiceStatus } from '../lib/types';
 import { useApiResource } from '../lib/use-api-resource';
 
 const STATUS_OPTIONS: readonly InvoiceStatus[] = ['Draft', 'Confirmed', 'Paid', 'Cancelled'];
+
+type LedgerView = 'all' | 'outstanding' | 'overdue';
+
+const VIEW_OPTIONS: readonly { value: LedgerView; label: string }[] = [
+  { value: 'all', label: 'All invoices' },
+  { value: 'outstanding', label: 'Outstanding' },
+  { value: 'overdue', label: 'Overdue' },
+];
 
 /**
  * The invoice ledger. The API already applies the tenant rule — a customer
@@ -24,28 +33,35 @@ export function InvoicesPage() {
   const { data, isLoading, error, reload } = useApiResource<Invoice[]>('/invoices');
 
   const [statusFilter, setStatusFilter] = useState('');
+  const [view, setView] = useState<LedgerView>('all');
   const [query, setQuery] = useState('');
 
   const invoices = data ?? [];
 
   const totals = useMemo(() => {
     let outstanding = 0;
+    let outstandingCount = 0;
     let collected = 0;
     let overdue = 0;
 
     for (const invoice of invoices) {
       if (invoice.status === 'Cancelled') continue;
       outstanding += invoice.balanceDue;
+      if (invoice.balanceDue > 0) outstandingCount += 1;
       collected += invoice.amountPaid;
       if (invoice.isOverdue) overdue += 1;
     }
 
-    return { outstanding, collected, overdue };
+    return { outstanding, outstandingCount, collected, overdue };
   }, [invoices]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return invoices.filter((invoice) => {
+      if (view === 'outstanding' && (invoice.status === 'Cancelled' || invoice.balanceDue <= 0)) {
+        return false;
+      }
+      if (view === 'overdue' && !invoice.isOverdue) return false;
       if (statusFilter !== '' && invoice.status !== statusFilter) return false;
       if (needle === '') return true;
       return (
@@ -55,7 +71,7 @@ export function InvoicesPage() {
         invoice.customerEmail.toLowerCase().includes(needle)
       );
     });
-  }, [invoices, statusFilter, query]);
+  }, [invoices, statusFilter, query, view]);
 
   return (
     <AppShell>
@@ -107,6 +123,42 @@ export function InvoicesPage() {
                 </dd>
               </div>
             </dl>
+
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Invoice view">
+              {VIEW_OPTIONS.map((option) => {
+                const count =
+                  option.value === 'all'
+                    ? invoices.length
+                    : option.value === 'outstanding'
+                      ? totals.outstandingCount
+                      : totals.overdue;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={view === option.value}
+                    onClick={() => setView(option.value)}
+                    className={cx(
+                      'inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors',
+                      view === option.value
+                        ? 'border-plum-600 bg-plum-50 text-plum-800'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+                    )}
+                  >
+                    {option.label}
+                    <span
+                      className={cx(
+                        'rounded-full px-1.5 text-xs font-semibold tabular-nums',
+                        view === option.value ? 'bg-plum-600 text-white' : 'bg-slate-100 text-slate-600',
+                      )}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
 
             <div className="card overflow-hidden">
               <div className="flex flex-wrap items-end gap-3 border-b border-slate-200 bg-slate-50/60 px-5 py-4">

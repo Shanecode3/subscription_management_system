@@ -10,6 +10,7 @@ import type {
 import type { InvoiceAction, InvoiceStatus } from '../utils/billing.validators';
 import { ForbiddenError, NotFoundError, ValidationError } from '../utils/errors';
 import { toAmount } from '../utils/money';
+import { paymentsForInvoice, type PaymentDto } from './payment.service';
 import type { Requester } from './requester';
 
 // ---------------------------------------------------------------------------
@@ -64,6 +65,8 @@ export interface InvoiceDto {
   /** Actions this invoice may still receive, computed from its status. */
   allowedActions: InvoiceAction[];
   lines: InvoiceLineDto[];
+  /** The payment history behind `amountPaid`, oldest first. */
+  payments: PaymentDto[];
   createdAt: string;
   updatedAt: string;
 }
@@ -133,7 +136,11 @@ function toLineDto(row: InvoiceLineRow): InvoiceLineDto {
   };
 }
 
-export function toInvoiceDto(row: InvoiceRow, lines: InvoiceLineRow[]): InvoiceDto {
+export function toInvoiceDto(
+  row: InvoiceRow,
+  lines: InvoiceLineRow[],
+  payments: PaymentDto[] = [],
+): InvoiceDto {
   const totalAmount = toAmount(row.total_amount);
   const amountPaid = toAmount(row.amount_paid);
 
@@ -167,6 +174,7 @@ export function toInvoiceDto(row: InvoiceRow, lines: InvoiceLineRow[]): InvoiceD
     notes: row.notes,
     allowedActions: allowedActionsFor(row.status),
     lines: lines.map(toLineDto),
+    payments,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -225,7 +233,22 @@ async function reload(id: number, client: PoolClient): Promise<InvoiceDto> {
   const row = await invoiceRepository.findInvoiceById(id, client);
   if (!row) throw new NotFoundError('That invoice does not exist.');
   const lines = await invoiceRepository.listLinesForInvoice(id, client);
-  return toInvoiceDto(row, lines);
+  const payments = await paymentsForInvoice(id, client);
+  return toInvoiceDto(row, lines, payments);
+}
+
+/**
+ * The overdue list is a filter, not a new document type: same rows, same DTO,
+ * ordered by how long they have been late so the oldest debt is first.
+ */
+export async function listOverdueInvoices(
+  requester: Requester,
+  customerId?: number,
+  limit?: number,
+): Promise<InvoiceDto[]> {
+  const scopedCustomerId = isInternal(requester) ? customerId : requester.id;
+  const rows = await invoiceRepository.listOverdueInvoices(scopedCustomerId, limit);
+  return rows.map((row) => toInvoiceDto(row, []));
 }
 
 export async function getInvoice(id: number, requester: Requester): Promise<InvoiceDto> {
@@ -234,7 +257,8 @@ export async function getInvoice(id: number, requester: Requester): Promise<Invo
   assertVisible(row, requester);
 
   const lines = await invoiceRepository.listLinesForInvoice(id);
-  return toInvoiceDto(row, lines);
+  const payments = await paymentsForInvoice(id);
+  return toInvoiceDto(row, lines, payments);
 }
 
 // ---------------------------------------------------------------------------
@@ -304,6 +328,14 @@ export async function performInvoiceAction(
       throw new ValidationError(rejectionMessage(action, row.status), [
         { field: 'status', message: rejectionMessage(action, row.status) },
       ]);
+    }
+
+    // Cancelling a part-paid invoice would strand real money against a document
+    // the team may never touch again, so the ledger has to be reconciled first.
+    const alreadyPaid = toAmount(row.amount_paid);
+    if (action === 'cancel' && alreadyPaid > 0) {
+      const message = `Payments of $${alreadyPaid.toFixed(2)} have been recorded against this invoice, so it cannot be cancelled.`;
+      throw new ValidationError(message, [{ field: 'status', message }]);
     }
 
     const patch = patchForAction(action, row, note);

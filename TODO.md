@@ -217,27 +217,30 @@
 - **AC5.3 (Overdue Detection):** Given an invoice with `status = 'Confirmed'` and `due_date < CURRENT_DATE`, When evaluated by the system, Then classify as Overdue and calculate days overdue.
 
 ### Task Checklist
-- [ ] **5.1 Payment Engine & Ledger:**
-  - [ ] Implement `server/src/routes/payment.routes.ts` & `payment.service.ts`.
-  - [ ] Assign sequential payment numbering `PAY-2026-XXXX` via `seq_payment_number`.
-  - [ ] Support payment methods: `Bank Transfer`, `Credit Card`, `UPI`, `Cash`.
-  - [ ] Record `payment_date`, `amount`, `reference_note`, and `recorded_by`.
-- [ ] **5.2 Automatic Invoice Reconciliation:**
-  - [ ] Atomic database transaction: insert payment + increment `invoices.amount_paid`.
-  - [ ] Transition invoice to `Paid` when `amount_paid >= total_amount`.
-  - [ ] Reconcile outstanding balances across all customer invoices.
-- [ ] **5.3 Payment History & Overdue Ledger API:**
-  - [ ] Implement `/api/v1/payments` list with filter by customer, invoice, and date range.
-  - [ ] Implement `/api/v1/invoices/overdue` endpoint returning overdue invoices with `days_overdue` and `balance_due`.
-- [ ] **5.4 Frontend Payment Modal & Invoice Reconciliation UI:**
-  - [ ] Build "Record Payment" modal on `InvoiceDetailView.tsx`.
-  - [ ] Render Payment History table on the invoice with payment method badges.
-  - [ ] Add Paid/Outstanding/Overdue status filters on `InvoicesListView.tsx`.
-- [ ] **5.5 Verification & Commit:**
-  - [ ] Verify full and partial payment reconciliations.
-  - [ ] Test overdue invoice calculations.
-  - [ ] Update `DEFENSE_LOG.md` (Milestone 5 entries).
-  - [ ] Git commit and push to `origin main`.
+- [x] **5.1 Payment Engine & Ledger:**
+  - [x] Implement `server/src/routes/payment.routes.ts` & `payment.service.ts` (plus `payment.repository.ts` and `utils/payment.validators.ts`).
+  - [x] Assign sequential payment numbering `PAY-2026-XXXX` via `seq_payment_number` (drawn inside SQL, never in application code).
+  - [x] Support payment methods: `Bank Transfer`, `Credit Card`, `UPI`, `Cash` (zod enum + PostgreSQL `CHECK`).
+  - [x] Record `payment_date`, `amount`, `reference_note`, and `recorded_by`.
+- [x] **5.2 Automatic Invoice Reconciliation:**
+  - [x] Atomic database transaction: insert payment + increment `invoices.amount_paid` under `SELECT … FOR UPDATE`.
+  - [x] Transition invoice to `Paid` when `amount_paid >= total_amount` in the same `UPDATE`.
+  - [x] Reconcile outstanding balances across all customer invoices (`balanceDue` on every invoice DTO).
+  - [x] Refuse a payment on a `Draft`, `Cancelled` or `Paid` invoice, an over-payment, a future date, or a date before the issue date.
+  - [x] Refuse to cancel an invoice that already has payments recorded against it.
+- [x] **5.3 Payment History & Overdue Ledger API:**
+  - [x] Implement `/api/v1/payments` list with filter by customer, invoice, and date range.
+  - [x] Implement `/api/v1/invoices/overdue` endpoint returning overdue invoices with `days_overdue` and `balance_due`.
+  - [x] Tenant rule: a customer session is forced onto its own `customer_id`, even when it passes `?customerId=`.
+- [x] **5.4 Frontend Payment Modal & Invoice Reconciliation UI:**
+  - [x] Build "Record Payment" modal on `InvoiceDetailView.tsx` (`components/billing/PaymentFormModal.tsx`).
+  - [x] Render Payment History table on the invoice with payment method badges (and a payments block on the printed invoice).
+  - [x] Add Paid/Outstanding/Overdue status filters on `InvoicesPage.tsx`.
+- [x] **5.5 Verification & Commit:**
+  - [x] Verify full and partial payment reconciliations (77 live assertions on a throwaway PostgreSQL 18 cluster).
+  - [x] Test overdue invoice calculations (`days_overdue` computed in SQL, paid invoices excluded).
+  - [x] Update `DEFENSE_LOG.md` (Milestone 5 entries).
+  - [x] Git commit and push to `origin main`.
 
 ---
 

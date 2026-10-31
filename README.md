@@ -93,7 +93,7 @@ These are local seed accounts for evaluation only.
 
 ---
 
-## API surface (Milestones 1–4)
+## API surface (Milestones 1–5)
 
 Base path: `/api/v1`
 
@@ -142,11 +142,14 @@ Base path: `/api/v1`
 | `PATCH` | `/discount-rules/:id` | **Admin only** |
 | `DELETE` | `/discount-rules/:id` | **Admin only** — retires the rule and detaches it |
 | `GET` | `/invoices` | Authenticated — filter by `status`, `customerId`, `from`, `to`, `limit`; customers see only their own |
+| `GET` | `/invoices/overdue` | Authenticated — `Confirmed` invoices past `due_date`, with `daysOverdue` and `balanceDue` |
 | `GET` | `/invoices/:id` | Authenticated — 404 for another customer's invoice |
 | `POST` | `/invoices/:id/confirm` | Admin, Staff — `Draft → Confirmed` |
 | `POST` | `/invoices/:id/send` | Admin, Staff — records `sentAt` |
-| `POST` | `/invoices/:id/cancel` | Admin, Staff — `Draft`/`Confirmed → Cancelled` |
+| `POST` | `/invoices/:id/cancel` | Admin, Staff — `Draft`/`Confirmed → Cancelled`; refused once payments exist |
 | `POST` | `/invoices/:id/print` | Admin, Staff — records the print action |
+| `GET` | `/payments` | Authenticated — filter by `invoiceId`, `customerId`, `from`, `to`, `limit`; customers see only their own |
+| `POST` | `/payments` | Admin, Staff — records a receipt and reconciles the invoice in one transaction |
 | `GET` | `/billing/pending` | Admin, Staff — due contracts, totals and auto-closes |
 | `POST` | `/billing/run-billing-day` | Admin, Staff — idempotent invoice generation |
 
@@ -165,8 +168,8 @@ Responses use one envelope everywhere:
 server/src/
   config/      environment parsing (fails fast on missing values)
   db/          schema.sql, pool, create/init/seed scripts
-  repositories/  SQL only (products, plans, templates, subscriptions, invoices, tax, discounts, users, audit)
-  services/      business rules only (incl. billing engine, invoice actions, discount evaluation)
+  repositories/  SQL only (products, plans, templates, subscriptions, invoices, payments, tax, discounts, users, audit)
+  services/      business rules only (incl. billing engine, invoice actions, payment reconciliation, discount evaluation)
   middleware/    auth, validation, errors, request logging
   routes/        HTTP surface only
   utils/         errors, validators, JWT, logger, response, money, params, dates

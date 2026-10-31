@@ -12,6 +12,7 @@ import { portalRouter } from './portal.routes';
 import { taxRouter } from './tax.routes';
 import { discountRouter } from './discount.routes';
 import { invoiceRouter } from './invoice.routes';
+import { paymentRouter } from './payment.routes';
 import { billingRouter } from './billing.routes';
 
 export const apiRouter = Router();
@@ -50,5 +51,6 @@ apiRouter.use('/subscriptions', subscriptionRouter);
 apiRouter.use('/tax-rules', taxRouter);
 apiRouter.use('/discount-rules', discountRouter);
 apiRouter.use('/invoices', invoiceRouter);
+apiRouter.use('/payments', paymentRouter);
 apiRouter.use('/billing', billingRouter);
 apiRouter.use('/portal', portalRouter);
