@@ -7,9 +7,12 @@ import { cx } from '../../lib/cx';
 export function BrandMark({
   size = 'md',
   tone = 'dark',
+  compact = false,
 }: {
   size?: 'sm' | 'md';
   tone?: 'dark' | 'light';
+  /** On narrow headers, keep the mark and drop the wordmark so it cannot collide. */
+  compact?: boolean;
 }) {
   const box = size === 'sm' ? 'h-8 w-8 text-sm' : 'h-10 w-10 text-base';
 
@@ -24,7 +27,7 @@ export function BrandMark({
       >
         B
       </div>
-      <div className="leading-tight">
+      <div className={cx('leading-tight', compact && 'hidden sm:block')}>
         <p
           className={cx(
             'font-semibold tracking-tight',

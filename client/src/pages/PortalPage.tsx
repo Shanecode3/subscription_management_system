@@ -11,18 +11,27 @@ import { Switch } from '../components/ui/Switch';
 import { ApiError, apiRequest } from '../lib/api';
 import { useAuth } from '../lib/auth-context';
 import { formatDate, formatMoney, intervalLabel } from '../lib/format';
-import { STATUS_TONE, transitionLabel } from '../lib/subscription-status';
+import {
+  portalActionFor,
+  portalActionLabel,
+  STATUS_TONE,
+  type PortalAction,
+} from '../lib/subscription-status';
 import type { Subscription, SubscriptionStatus } from '../lib/types';
 import { useApiResource } from '../lib/use-api-resource';
 
-type LifecycleAction = 'pause' | 'resume' | 'early-close' | 'renew';
-
-function actionFor(current: SubscriptionStatus, next: SubscriptionStatus): LifecycleAction | null {
-  if (next === 'Paused') return 'pause';
-  if (next === 'Closed') return 'early-close';
-  if (next === 'Active') return current === 'Closed' ? 'renew' : 'resume';
-  return null;
-}
+/** What each state means to the customer, when there is no button to press. */
+const STATUS_EXPLANATION: Record<SubscriptionStatus, string> = {
+  Draft:
+    'Your account manager is still building this offer. Nothing is due and you have nothing to do until it arrives as a quotation.',
+  Quotation:
+    'This quotation is waiting on you: accept it to start the contract, or decline it if it is not right.',
+  Confirmed:
+    'You accepted this quotation. Brightloop activates it on the start date, and it bills from then on.',
+  Active: 'This plan cannot be paused, closed early or renewed on its terms.',
+  Paused: 'This contract is paused. Resume it whenever you are ready to start billing again.',
+  Closed: 'This contract has ended. Renew it to start a new period on the same terms.',
+};
 
 /**
  * The customer's own window into Brightloop. The list comes from
@@ -44,7 +53,7 @@ export function PortalPage() {
     setData(subscriptions.map((item) => (item.id === updated.id ? updated : item)));
   };
 
-  const runAction = async (subscription: Subscription, action: LifecycleAction) => {
+  const runAction = async (subscription: Subscription, action: PortalAction) => {
     setNotice(null);
     setActionError(null);
     setBusyAction(`${subscription.id}:${action}`);
@@ -95,6 +104,11 @@ export function PortalPage() {
     [subscriptions],
   );
 
+  const awaitingDecision = useMemo(
+    () => subscriptions.filter((subscription) => subscription.status === 'Quotation').length,
+    [subscriptions],
+  );
+
   const stats = useMemo(() => {
     let activeSubs = 0;
     let totalPerPeriod = 0;
@@ -123,9 +137,11 @@ export function PortalPage() {
         <PageHeader
           title="My subscriptions"
           description={
-            activeCount > 0
-              ? `You have ${activeCount} active ${activeCount === 1 ? 'subscription' : 'subscriptions'}. Switch add-ons on or off, or manage the contract where your plan allows it.`
-              : 'Your contracts with Brightloop, and what each plan lets you do.'
+            awaitingDecision > 0
+              ? `${awaitingDecision} quotation${awaitingDecision === 1 ? '' : 's'} ${awaitingDecision === 1 ? 'is' : 'are'} waiting on you. Accept to start the contract, or decline it.`
+              : activeCount > 0
+                ? `You have ${activeCount} active ${activeCount === 1 ? 'subscription' : 'subscriptions'}. Switch add-ons on or off, or manage the contract where your plan allows it.`
+                : 'Your contracts with Brightloop, and what each plan lets you do.'
           }
         />
 
@@ -193,11 +209,13 @@ export function PortalPage() {
             {subscriptions.map((subscription) => {
               const canToggleAddons = subscription.status === 'Active';
               const lifecycleMoves = subscription.allowedTransitions
-                .map((next) => ({ next, action: actionFor(subscription.status, next) }))
-                .filter(
-                  (move): move is { next: SubscriptionStatus; action: LifecycleAction } =>
-                    move.action !== null,
-                );
+                .map((next) => portalActionFor(subscription.status, next))
+                .filter((action): action is PortalAction => action !== null);
+              // A contract that has never been live has a start date, not a
+              // renewal date — labelling a quotation "Renews …" is what made a
+              // pending offer look like an existing subscription.
+              const isLive = subscription.activatedAt !== null;
+              const isQuotation = subscription.status === 'Quotation';
 
               return (
                 <article key={subscription.id} className="card overflow-hidden">
@@ -218,13 +236,24 @@ export function PortalPage() {
                         <span aria-hidden="true">·</span>
                         <span className="inline-flex items-center gap-1">
                           <CalendarDays className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
-                          Renews {formatDate(subscription.nextBillingDate)}
+                          {isLive
+                            ? `Next bill ${formatDate(subscription.nextBillingDate)}`
+                            : `Starts ${formatDate(subscription.startDate)}`}
+                          {subscription.expiryDate
+                            ? ` · Ends ${formatDate(subscription.expiryDate)}`
+                            : ''}
                         </span>
                       </p>
                     </div>
 
                     <div className="text-right">
-                      <p className="text-xs text-slate-500">Billed per period</p>
+                      <p className="text-xs text-slate-500">
+                        {isLive
+                          ? 'Billed per period'
+                          : isQuotation
+                            ? 'Quoted total'
+                            : 'Contracted total'}
+                      </p>
                       <p className="text-lg font-semibold tabular-nums text-ink">
                         {formatMoney(subscription.total)}
                       </p>
@@ -234,6 +263,16 @@ export function PortalPage() {
                   <div className="border-b border-slate-100 px-5 py-3">
                     <StatusStepper status={subscription.status} />
                   </div>
+
+                  {isQuotation ? (
+                    <div className="border-b border-plum-100 bg-plum-50/70 px-5 py-3">
+                      <p className="text-sm text-plum-900">
+                        <span className="font-semibold">This is a quotation, not an active contract.</span>{' '}
+                        Nothing has been billed. Accept it to confirm the terms, or decline it if
+                        it is not right.
+                      </p>
+                    </div>
+                  ) : null}
 
                   <div className="divide-y divide-slate-100">
                     {subscription.lines.map((line) => {
@@ -287,22 +326,24 @@ export function PortalPage() {
 
                     <div className="flex flex-wrap gap-2">
                       {lifecycleMoves.length === 0 ? (
-                        <p className="text-xs text-slate-500">
-                          {subscription.status === 'Active'
-                            ? 'This plan cannot be paused, closed early or renewed.'
-                            : `A ${subscription.status.toLowerCase()} contract has no self-service actions.`}
+                        <p className="max-w-md text-xs leading-relaxed text-slate-500">
+                          {STATUS_EXPLANATION[subscription.status]}
                         </p>
                       ) : (
-                        lifecycleMoves.map(({ next, action }) => (
+                        lifecycleMoves.map((action) => (
                           <Button
                             key={action}
-                            variant={action === 'early-close' ? 'secondary' : 'primary'}
+                            variant={
+                              action === 'decline' || action === 'early-close'
+                                ? 'secondary'
+                                : 'primary'
+                            }
                             className="w-auto"
                             isLoading={busyAction === `${subscription.id}:${action}`}
                             disabled={busyAction !== null && busyAction !== `${subscription.id}:${action}`}
                             onClick={() => runAction(subscription, action)}
                           >
-                            {transitionLabel(next, subscription.status)}
+                            {portalActionLabel(action)}
                           </Button>
                         ))
                       )}

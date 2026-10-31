@@ -55,6 +55,39 @@ portalRouter.patch(
 );
 
 portalRouter.post(
+  '/subscriptions/:id/accept',
+  validateBody(lifecycleActionSchema),
+  asyncHandler(async (req, res) => {
+    const id = parsePositiveIntParam(req.params.id, 'Subscription id');
+    const subscription = await subscriptionService.acceptQuotation(
+      id,
+      req.user!,
+      req.body.reason,
+    );
+    return sendSuccess(
+      res,
+      subscription,
+      200,
+      'Quotation accepted. Brightloop will activate the contract on its start date.',
+    );
+  }),
+);
+
+portalRouter.post(
+  '/subscriptions/:id/decline',
+  validateBody(lifecycleActionSchema),
+  asyncHandler(async (req, res) => {
+    const id = parsePositiveIntParam(req.params.id, 'Subscription id');
+    const subscription = await subscriptionService.declineQuotation(
+      id,
+      req.user!,
+      req.body.reason,
+    );
+    return sendSuccess(res, subscription, 200, 'Quotation declined.');
+  }),
+);
+
+portalRouter.post(
   '/subscriptions/:id/pause',
   validateBody(lifecycleActionSchema),
   asyncHandler(async (req, res) => {

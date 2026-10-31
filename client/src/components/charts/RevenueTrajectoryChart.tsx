@@ -3,10 +3,12 @@ import { formatMoney } from '../../lib/format';
 import { cx } from '../../lib/cx';
 
 export interface TrajectoryDataPoint {
-  period: string; // e.g. "May", "Jun", "Jul", "Aug", "Sep", "Oct"
+  /** 'YYYY-MM', the key the SQL bucket came back under. */
+  period: string;
+  /** Short month label for the axis, e.g. "May". */
+  label: string;
   invoiced: number;
   collected: number;
-  activeCount: number;
 }
 
 interface RevenueTrajectoryChartProps {
@@ -14,19 +16,27 @@ interface RevenueTrajectoryChartProps {
   className?: string;
 }
 
+/** Rounds a raw maximum up to 1, 2, 2.5 or 5 × 10^n, so axis ticks read cleanly. */
+function niceStep(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 1;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(value)));
+  const fraction = value / magnitude;
+  const snapped = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 2.5 ? 2.5 : fraction <= 5 ? 5 : 10;
+  return snapped * magnitude;
+}
+
 /**
- * Ultra high-performance SVG Area Chart.
- * Native React SVG with zero external dependencies (0ms overhead, < 1ms render).
- * Displays historical and projected cash-flow trajectory with interactive tooltips.
+ * SVG line-and-area chart for the six monthly buckets the finance endpoint
+ * aggregates in PostgreSQL. It plots exactly the rows it is handed — no point
+ * on this chart is computed, smoothed or projected in the browser.
  */
 export function RevenueTrajectoryChart({ data, className }: RevenueTrajectoryChartProps) {
   const [activePoint, setActivePoint] = useState<TrajectoryDataPoint | null>(null);
-  const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
 
   if (!data || data.length === 0) {
     return (
       <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-slate-200 text-xs text-slate-400">
-        No trajectory data available.
+        No billing history yet.
       </div>
     );
   }
@@ -42,13 +52,10 @@ export function RevenueTrajectoryChart({ data, className }: RevenueTrajectoryCha
   const chartWidth = width - paddingLeft - paddingRight;
   const chartHeight = height - paddingTop - paddingBottom;
 
-  // Compute maximum value for Y-axis scale
-  const maxValue = Math.max(
-    ...data.map((d) => Math.max(d.invoiced, d.collected)),
-    1000,
-  );
-  // Round ceiling to a neat number
-  const yCeil = Math.ceil(maxValue / 1000) * 1000 * 1.15;
+  // Four even bands above the baseline, with round tick values.
+  const maxValue = Math.max(...data.map((d) => Math.max(d.invoiced, d.collected)), 0);
+  const step = niceStep(maxValue / 4) || 1;
+  const yCeil = step * 4;
 
   const getX = (index: number) => {
     if (data.length <= 1) return paddingLeft + chartWidth / 2;
@@ -73,11 +80,10 @@ export function RevenueTrajectoryChart({ data, className }: RevenueTrajectoryCha
   const invoicedAreaPath = `${invoicedLinePath} L ${lastX},${baselineY} L ${firstX},${baselineY} Z`;
   const collectedAreaPath = `${collectedLinePath} L ${lastX},${baselineY} L ${firstX},${baselineY} Z`;
 
-  // 4 horizontal gridlines
-  const gridLines = [0, 0.33, 0.66, 1].map((ratio) => {
-    const val = yCeil * ratio;
+  const gridLines = [0, 1, 2, 3, 4].map((band) => {
+    const val = step * band;
     const y = getY(val);
-    return { val, y };
+    return { val, y, isBaseline: band === 0 };
   });
 
   return (
@@ -86,24 +92,25 @@ export function RevenueTrajectoryChart({ data, className }: RevenueTrajectoryCha
         <div className="flex items-center gap-4 text-xs">
           <div className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-full bg-plum-600" />
-            <span className="font-medium text-slate-700">Invoiced Revenue</span>
+            <span className="font-medium text-slate-700">Invoiced</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-            <span className="font-medium text-slate-700">Cash Collected</span>
+            <span className="font-medium text-slate-700">Collected</span>
           </div>
         </div>
-        <p className="text-[11px] text-slate-400">Past 6 billing months & projected trajectory</p>
+        <p className="text-[11px] text-slate-500">
+          Last {data.length} months · invoices by issue date, cash by payment date
+        </p>
       </div>
 
       <div className="relative overflow-hidden rounded-xl border border-slate-100 bg-gradient-to-b from-slate-50/50 to-white p-2">
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className="h-auto w-full overflow-visible"
-          onMouseLeave={() => {
-            setActivePoint(null);
-            setMousePos(null);
-          }}
+          role="img"
+          aria-label="Invoiced and collected cash, by month"
+          onMouseLeave={() => setActivePoint(null)}
         >
           <defs>
             <linearGradient id="invoicedGrad" x1="0" y1="0" x2="0" y2="1">
@@ -117,22 +124,22 @@ export function RevenueTrajectoryChart({ data, className }: RevenueTrajectoryCha
           </defs>
 
           {/* Gridlines & Y-axis labels */}
-          {gridLines.map(({ val, y }, idx) => (
-            <g key={idx}>
+          {gridLines.map(({ val, y, isBaseline }) => (
+            <g key={val}>
               <line
                 x1={paddingLeft}
                 y1={y}
                 x2={paddingLeft + chartWidth}
                 y2={y}
                 stroke="#E2E8F0"
-                strokeDasharray={idx === 0 ? undefined : '3,3'}
+                strokeDasharray={isBaseline ? undefined : '3,3'}
                 strokeWidth="1"
               />
               <text
                 x={paddingLeft - 8}
                 y={y + 3.5}
                 textAnchor="end"
-                className="fill-slate-400 text-[10px] font-medium"
+                className="fill-slate-500 text-[10px] font-medium"
               >
                 ${Math.round(val).toLocaleString()}
               </text>
@@ -193,7 +200,7 @@ export function RevenueTrajectoryChart({ data, className }: RevenueTrajectoryCha
                     isHovered ? 'fill-plum-700' : 'fill-slate-500',
                   )}
                 >
-                  {d.period}
+                  {d.label}
                 </text>
 
                 {/* Invoiced Circle */}
@@ -222,10 +229,7 @@ export function RevenueTrajectoryChart({ data, className }: RevenueTrajectoryCha
                   height={chartHeight + 25}
                   fill="transparent"
                   className="cursor-pointer"
-                  onMouseEnter={() => {
-                    setActivePoint(d);
-                    setMousePos({ x, y: Math.min(yInv, yCol) });
-                  }}
+                  onMouseEnter={() => setActivePoint(d)}
                 />
               </g>
             );
@@ -233,14 +237,17 @@ export function RevenueTrajectoryChart({ data, className }: RevenueTrajectoryCha
         </svg>
 
         {/* Floating Tooltip */}
-        {activePoint && mousePos ? (
+        {activePoint ? (
           <div
-            className="pointer-events-none absolute -top-1 z-20 -translate-x-1/2 rounded-lg border border-slate-200 bg-white/95 px-3 py-2 shadow-lg backdrop-blur"
+            className="pointer-events-none absolute top-1 z-20 -translate-x-1/2 rounded-lg border border-slate-200 bg-white/95 px-3 py-2 shadow-lg backdrop-blur"
             style={{
-              left: `${(mousePos.x / width) * 100}%`,
+              left: `${Math.min(
+                88,
+                Math.max(12, (getX(data.indexOf(activePoint)) / width) * 100),
+              )}%`,
             }}
           >
-            <p className="text-xs font-bold text-slate-800">{activePoint.period} Performance</p>
+            <p className="text-xs font-bold text-slate-800">{activePoint.label}</p>
             <div className="mt-1 space-y-0.5 text-[11px]">
               <div className="flex justify-between gap-3 text-slate-600">
                 <span>Invoiced:</span>
@@ -253,10 +260,6 @@ export function RevenueTrajectoryChart({ data, className }: RevenueTrajectoryCha
                 <span className="font-semibold text-emerald-700">
                   {formatMoney(activePoint.collected)}
                 </span>
-              </div>
-              <div className="flex justify-between gap-3 border-t border-slate-100 pt-0.5 text-slate-500">
-                <span>Active Contracts:</span>
-                <span className="font-medium text-slate-700">{activePoint.activeCount}</span>
               </div>
             </div>
           </div>

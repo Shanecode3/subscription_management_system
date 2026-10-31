@@ -2,7 +2,7 @@ import { ArrowLeft, Printer } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Alert } from '../components/ui/Alert';
-import { PaymentQrCode } from '../components/ui/PaymentQrCode';
+import { PaymentInstructions } from '../components/ui/PaymentInstructions';
 import { ApiError, apiRequest } from '../lib/api';
 import { useAuth } from '../lib/auth-context';
 import { formatDate, formatMoney } from '../lib/format';
@@ -216,10 +216,11 @@ export function PrintInvoiceView() {
           <section className="mt-6 flex flex-wrap items-start justify-between gap-8">
             <div className="max-w-[280px]">
               {invoice.balanceDue > 0 ? (
-                <PaymentQrCode
+                <PaymentInstructions
                   invoiceNumber={invoice.invoiceNumber}
                   amount={invoice.balanceDue}
-                  customerName={invoice.customerName}
+                  paymentTerms={invoice.paymentTerms}
+                  dueDate={invoice.dueDate}
                 />
               ) : (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs font-medium text-emerald-800">

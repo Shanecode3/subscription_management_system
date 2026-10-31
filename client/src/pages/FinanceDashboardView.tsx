@@ -28,6 +28,10 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { SelectField } from '../components/ui/SelectField';
 import { exportToCsv } from '../lib/csv-export';
 import { formatDate, formatDateTime, formatMoney, intervalLabel } from '../lib/format';
+import {
+  SUBSCRIPTION_STATUS_COLOR,
+  SUBSCRIPTION_STATUS_HEX,
+} from '../lib/subscription-status';
 import type { FinanceDashboard, FinanceFilterOptions } from '../lib/types';
 import { useApiResource } from '../lib/use-api-resource';
 
@@ -92,33 +96,26 @@ export function FinanceDashboardView() {
 
   const dashboard = data;
 
-  // Real-time cash trajectory modeling
+  // Six monthly buckets aggregated in SQL, plotted exactly as they arrive.
   const trajectoryData = useMemo<TrajectoryDataPoint[]>(() => {
     if (!dashboard) return [];
-    const mrr = dashboard.mrr || 4500;
-    const collected = dashboard.totalRevenueCollected || 3300;
-    const count = dashboard.activeSubscriptions || 3;
-
-    return [
-      { period: 'May', invoiced: Math.round(mrr * 0.68), collected: Math.round(mrr * 0.65), activeCount: Math.max(1, count - 2) },
-      { period: 'Jun', invoiced: Math.round(mrr * 0.74), collected: Math.round(mrr * 0.72), activeCount: Math.max(1, count - 2) },
-      { period: 'Jul', invoiced: Math.round(mrr * 0.81), collected: Math.round(mrr * 0.77), activeCount: Math.max(2, count - 1) },
-      { period: 'Aug', invoiced: Math.round(mrr * 0.89), collected: Math.round(mrr * 0.85), activeCount: Math.max(2, count - 1) },
-      { period: 'Sep', invoiced: Math.round(mrr * 0.95), collected: Math.round(mrr * 0.91), activeCount: count },
-      { period: 'Oct (Current)', invoiced: Math.round(mrr), collected: Math.round(collected > 0 ? collected : mrr * 0.95), activeCount: count },
-    ];
+    return dashboard.revenueByMonth.map((point) => ({
+      period: point.period,
+      label: new Date(`${point.period}-01T00:00:00`).toLocaleString('en', { month: 'short' }),
+      invoiced: point.invoiced,
+      collected: point.collected,
+    }));
   }, [dashboard]);
 
-  // Contract Lifecycle distribution donut slices
+  // Contract counts per lifecycle state, straight from the subscriptions table.
   const statusSlices: StatusSlice[] = useMemo(() => {
     if (!dashboard) return [];
-    const active = dashboard.activeSubscriptions || 0;
-    return [
-      { label: 'Active', value: active, color: '#10B981', bgClass: 'bg-emerald-500' },
-      { label: 'Confirmed', value: Math.max(1, Math.round(active * 0.3)), color: '#3B82F6', bgClass: 'bg-blue-500' },
-      { label: 'Quotation', value: 1, color: '#F59E0B', bgClass: 'bg-amber-500' },
-      { label: 'Draft', value: 1, color: '#94A3B8', bgClass: 'bg-slate-400' },
-    ];
+    return dashboard.subscriptionsByStatus.map((slice) => ({
+      label: slice.status,
+      value: slice.count,
+      color: SUBSCRIPTION_STATUS_HEX[slice.status],
+      bgClass: SUBSCRIPTION_STATUS_COLOR[slice.status],
+    }));
   }, [dashboard]);
 
   // CSV Export for Overdue Chase List
@@ -384,9 +381,11 @@ export function FinanceDashboardView() {
                 <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
                   <h3 className="text-sm font-bold text-ink flex items-center gap-2">
                     <Activity className="h-4 w-4 text-plum-700" />
-                    Cash Flow & Invoicing Trajectory
+                    Cash flow and invoicing, by month
                   </h3>
-                  <span className="text-xs text-slate-400">Zero-latency SVG</span>
+                  <span className="text-xs text-slate-500">
+                    Aggregated in {dashboard.queryTimeMs} ms
+                  </span>
                 </div>
                 <RevenueTrajectoryChart data={trajectoryData} />
               </div>
@@ -395,13 +394,14 @@ export function FinanceDashboardView() {
                 <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
                   <h3 className="text-sm font-bold text-ink flex items-center gap-2">
                     <PieIcon className="h-4 w-4 text-teal-700" />
-                    Contract Portfolio Health
+                    Contract portfolio
                   </h3>
-                  <span className="text-xs text-slate-400">Status Gauge</span>
+                  <span className="text-xs text-slate-500">By status</span>
                 </div>
-                <StatusDonutChart slices={statusSlices} totalLabel="Contracts" />
-                <p className="mt-3 text-[11px] text-slate-400 border-t border-slate-100 pt-2">
-                  Portfolio balance between live revenue-generating contracts and sales pipeline.
+                <StatusDonutChart slices={statusSlices} totalLabel="contracts" />
+                <p className="mt-3 text-[11px] text-slate-500 border-t border-slate-100 pt-2">
+                  Every contract on file, split by where it sits in the lifecycle. These counts
+                  come from the same subscriptions table as the contracts board.
                 </p>
               </div>
             </section>

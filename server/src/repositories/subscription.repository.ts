@@ -33,6 +33,8 @@ export interface SubscriptionRow extends QueryResultRow {
   notes: string | null;
   paused_at: Date | null;
   closed_at: Date | null;
+  /** NULL until the contract first reached Active; renewal requires it. */
+  activated_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -87,6 +89,7 @@ export interface SubscriptionPatch {
   notes?: string | null;
   pausedAt?: Date | null;
   closedAt?: Date | null;
+  activatedAt?: Date | null;
 }
 
 const SUBSCRIPTION_COLUMNS = `
@@ -97,7 +100,7 @@ const SUBSCRIPTION_COLUMNS = `
   s.template_id, t.name AS template_name,
   s.status, s.start_date, s.expiry_date, s.payment_terms, s.next_billing_date,
   s.discount_rule_id, s.tax_rule_id,
-  s.notes, s.paused_at, s.closed_at, s.created_at, s.updated_at
+  s.notes, s.paused_at, s.closed_at, s.activated_at, s.created_at, s.updated_at
 `;
 
 const SUBSCRIPTION_FROM = `
@@ -125,6 +128,7 @@ const SUBSCRIPTION_PATCH_COLUMNS: Readonly<Record<keyof SubscriptionPatch, strin
   notes: 'notes',
   pausedAt: 'paused_at',
   closedAt: 'closed_at',
+  activatedAt: 'activated_at',
 };
 
 function run<T extends QueryResultRow>(

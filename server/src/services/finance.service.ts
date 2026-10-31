@@ -40,6 +40,18 @@ export interface FinanceFilterEcho {
   customerId: number | null;
 }
 
+export interface FinanceMonthlyPoint {
+  /** 'YYYY-MM' */
+  period: string;
+  invoiced: number;
+  collected: number;
+}
+
+export interface FinanceStatusCount {
+  status: string;
+  count: number;
+}
+
 export interface FinanceDashboardDto {
   /** Echoes the applied filters so the UI never labels unfiltered data by mistake. */
   filters: FinanceFilterEcho;
@@ -53,6 +65,10 @@ export interface FinanceDashboardDto {
   totalOverdueOwed: number;
   overdueInvoiceCount: number;
   mrrByInterval: FinanceIntervalSlice[];
+  /** Six month buckets of invoiced and collected cash, oldest first. */
+  revenueByMonth: FinanceMonthlyPoint[];
+  /** Live contract count per lifecycle state. */
+  subscriptionsByStatus: FinanceStatusCount[];
   /** Oldest first — the order the collections team works through them. */
   overdueInvoices: OverdueInvoiceDto[];
   /** Server-side duration of the aggregate queries, in milliseconds. */
@@ -149,13 +165,16 @@ export async function getDashboard(
   await assertFilterTargets(filter);
 
   const startedAt = performance.now();
-  const [subscriptions, intervals, revenue, invoices, overdue] = await Promise.all([
-    financeRepository.subscriptionTotals(filter),
-    financeRepository.mrrByInterval(filter),
-    financeRepository.revenueTotals(filter),
-    financeRepository.invoiceTotals(filter),
-    financeRepository.overdueInvoices(filter, overdueLimit),
-  ]);
+  const [subscriptions, intervals, revenue, invoices, overdue, monthly, statuses] =
+    await Promise.all([
+      financeRepository.subscriptionTotals(filter),
+      financeRepository.mrrByInterval(filter),
+      financeRepository.revenueTotals(filter),
+      financeRepository.invoiceTotals(filter),
+      financeRepository.overdueInvoices(filter, overdueLimit),
+      financeRepository.monthlyRevenueSeries(filter),
+      financeRepository.subscriptionStatusCounts(filter),
+    ]);
   const queryTimeMs = Math.round((performance.now() - startedAt) * 10) / 10;
 
   return {
@@ -178,6 +197,15 @@ export async function getDashboard(
       billingInterval: row.billing_interval as BillingInterval,
       subscriptions: row.subscriptions,
       mrr: toAmount(row.mrr),
+    })),
+    revenueByMonth: monthly.map((row) => ({
+      period: row.period,
+      invoiced: toAmount(row.invoiced),
+      collected: toAmount(row.collected),
+    })),
+    subscriptionsByStatus: statuses.map((row) => ({
+      status: row.status,
+      count: row.count,
     })),
     overdueInvoices: overdue.map((row) => ({
       id: row.id,

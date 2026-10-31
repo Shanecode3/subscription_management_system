@@ -24,9 +24,15 @@ export function Button({
   disabled,
   ...props
 }: ButtonProps) {
+  // Forms want a full-width submit button, but a toolbar or a pair of
+  // lifecycle actions wants its natural width. Joining both classes and
+  // letting CSS pick the winner is a coin toss, so an explicit `w-…` from the
+  // caller wins outright.
+  const hasExplicitWidth = className !== undefined && /(^|\s)w-/.test(className);
+
   return (
     <button
-      className={cx(VARIANT_CLASS[variant], 'w-full', className)}
+      className={cx(VARIANT_CLASS[variant], hasExplicitWidth ? null : 'w-full', className)}
       disabled={disabled || isLoading}
       aria-busy={isLoading}
       {...props}

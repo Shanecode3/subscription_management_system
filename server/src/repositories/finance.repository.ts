@@ -34,6 +34,18 @@ export interface RevenueTotalsRow extends QueryResultRow {
   collected: string;
 }
 
+export interface MonthlyRevenueRow extends QueryResultRow {
+  /** 'YYYY-MM', oldest first. */
+  period: string;
+  invoiced: string;
+  collected: string;
+}
+
+export interface StatusCountRow extends QueryResultRow {
+  status: string;
+  count: number;
+}
+
 export interface InvoiceTotalsRow extends QueryResultRow {
   outstanding: string;
   open_invoices: number;
@@ -101,6 +113,20 @@ function invoiceDateWindow(filter: FinanceFilter, values: unknown[], alias = 'i'
   if (filter.endDate !== undefined) {
     values.push(filter.endDate);
     conditions.push(`${alias}.issue_date <= $${values.length}::date`);
+  }
+  return conditions.map((condition) => ` AND ${condition}`).join('');
+}
+
+/** Payment-date window: cash is bucketed by when the bank saw it, not when it was billed. */
+function paymentDateWindow(filter: FinanceFilter, values: unknown[], alias = 'p'): string {
+  const conditions: string[] = [];
+  if (filter.startDate !== undefined) {
+    values.push(filter.startDate);
+    conditions.push(`${alias}.payment_date >= $${values.length}::date`);
+  }
+  if (filter.endDate !== undefined) {
+    values.push(filter.endDate);
+    conditions.push(`${alias}.payment_date <= $${values.length}::date`);
   }
   return conditions.map((condition) => ` AND ${condition}`).join('');
 }
@@ -173,6 +199,90 @@ export async function mrrByInterval(filter: FinanceFilter): Promise<IntervalSlic
                  WHEN 'yearly'  THEN 2
                  WHEN 'weekly'  THEN 3
                  WHEN 'daily'   THEN 4
+               END`,
+    values,
+  );
+
+  return result.rows;
+}
+
+/**
+ * Six months of cash, bucketed by month inside PostgreSQL. `generate_series`
+ * supplies the months so a quiet month is a real zero instead of a missing
+ * column, and the two facts come from their own ledgers: billing from invoices
+ * by issue date, cash from payments by payment date. Cancelled invoices are
+ * excluded because they were never money anyone owed.
+ */
+export async function monthlyRevenueSeries(
+  filter: FinanceFilter,
+  months = 6,
+): Promise<MonthlyRevenueRow[]> {
+  const values: unknown[] = [months];
+  const scope = subscriptionScope(filter, values);
+  const invoicedWindow = invoiceDateWindow(filter, values, 'i');
+  const collectedWindow = paymentDateWindow(filter, values, 'p');
+
+  const result = await query<MonthlyRevenueRow>(
+    `WITH months AS (
+       SELECT generate_series(
+                date_trunc('month', CURRENT_DATE) - ($1::int - 1) * interval '1 month',
+                date_trunc('month', CURRENT_DATE),
+                interval '1 month'
+              )::date AS month_start
+     ),
+     invoiced AS (
+       SELECT date_trunc('month', i.issue_date)::date AS month_start,
+              SUM(i.total_amount)::numeric(14,2) AS amount
+         FROM invoices i
+         JOIN subscriptions s ON s.id = i.subscription_id
+        WHERE i.status <> 'Cancelled'${invoicedWindow}${scope}
+        GROUP BY 1
+     ),
+     collected AS (
+       SELECT date_trunc('month', p.payment_date)::date AS month_start,
+              SUM(p.amount)::numeric(14,2) AS amount
+         FROM payments p
+         JOIN invoices i ON i.id = p.invoice_id
+         JOIN subscriptions s ON s.id = i.subscription_id
+        WHERE TRUE${collectedWindow}${scope}
+        GROUP BY 1
+     )
+     SELECT to_char(m.month_start, 'YYYY-MM') AS period,
+            COALESCE(inv.amount, 0)::text AS invoiced,
+            COALESCE(col.amount, 0)::text AS collected
+       FROM months m
+       LEFT JOIN invoiced inv ON inv.month_start = m.month_start
+       LEFT JOIN collected col ON col.month_start = m.month_start
+      ORDER BY m.month_start ASC`,
+    values,
+  );
+
+  return result.rows;
+}
+
+/**
+ * How the whole portfolio is distributed across the lifecycle. Read straight
+ * from `subscriptions`, so the finance dashboard and the subscriptions board
+ * can never disagree about how many contracts are in each state.
+ */
+export async function subscriptionStatusCounts(
+  filter: FinanceFilter,
+): Promise<StatusCountRow[]> {
+  const values: unknown[] = [];
+  const scope = subscriptionScope(filter, values);
+
+  const result = await query<StatusCountRow>(
+    `SELECT s.status, COUNT(*)::int AS count
+       FROM subscriptions s
+      WHERE TRUE${scope}
+      GROUP BY s.status
+      ORDER BY CASE s.status
+                 WHEN 'Draft'     THEN 1
+                 WHEN 'Quotation' THEN 2
+                 WHEN 'Confirmed' THEN 3
+                 WHEN 'Active'    THEN 4
+                 WHEN 'Paused'    THEN 5
+                 WHEN 'Closed'    THEN 6
                END`,
     values,
   );

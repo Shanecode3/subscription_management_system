@@ -170,6 +170,8 @@ export interface Subscription {
   notes: string | null;
   pausedAt: string | null;
   closedAt: string | null;
+  /** When the contract first went live; null while it is still pipeline. */
+  activatedAt: string | null;
   flags: SubscriptionFlags;
   allowedTransitions: SubscriptionStatus[];
   lines: SubscriptionLine[];
@@ -384,6 +386,18 @@ export interface FinanceIntervalSlice {
   mrr: number;
 }
 
+export interface FinanceMonthlyPoint {
+  /** 'YYYY-MM' */
+  period: string;
+  invoiced: number;
+  collected: number;
+}
+
+export interface FinanceStatusCount {
+  status: SubscriptionStatus;
+  count: number;
+}
+
 export interface FinanceOverdueInvoice {
   id: number;
   invoiceNumber: string;
@@ -420,6 +434,10 @@ export interface FinanceDashboard {
   totalOverdueOwed: number;
   overdueInvoiceCount: number;
   mrrByInterval: FinanceIntervalSlice[];
+  /** Six month buckets of invoiced and collected cash, oldest first. */
+  revenueByMonth: FinanceMonthlyPoint[];
+  /** Live contract count per lifecycle state, straight from subscriptions. */
+  subscriptionsByStatus: FinanceStatusCount[];
   overdueInvoices: FinanceOverdueInvoice[];
   /** Server-side milliseconds spent on the aggregate queries. */
   queryTimeMs: number;

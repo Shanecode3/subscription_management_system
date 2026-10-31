@@ -74,6 +74,8 @@ export interface SubscriptionDto {
   notes: string | null;
   pausedAt: string | null;
   closedAt: string | null;
+  /** When the contract first went live. NULL while it is still pipeline. */
+  activatedAt: string | null;
   flags: SubscriptionFlags;
   /** States this contract may move to next, already filtered by the plan flags. */
   allowedTransitions: SubscriptionStatus[];
@@ -125,8 +127,16 @@ function flagViolation(row: SubscriptionRow, next: SubscriptionStatus): string |
   ) {
     return `The ${row.plan_name} plan does not allow early closure.`;
   }
-  if (next === 'Active' && row.status === 'Closed' && !row.allow_renew) {
-    return `The ${row.plan_name} plan does not allow renewal.`;
+  if (next === 'Active' && row.status === 'Closed') {
+    // A contract that never went live was cancelled, not run out. Reopening it
+    // as "renewed" would hand the customer a fresh period they never agreed to,
+    // so the correct move is a brand-new subscription.
+    if (row.activated_at === null) {
+      return 'This contract was cancelled before it ever went live, so there is nothing to renew. Start a new subscription instead.';
+    }
+    if (!row.allow_renew) {
+      return `The ${row.plan_name} plan does not allow renewal.`;
+    }
   }
   return null;
 }
@@ -190,6 +200,7 @@ export function toSubscriptionDto(
     notes: row.notes,
     pausedAt: row.paused_at ? row.paused_at.toISOString() : null,
     closedAt: row.closed_at ? row.closed_at.toISOString() : null,
+    activatedAt: row.activated_at ? row.activated_at.toISOString() : null,
     flags: {
       autoClose: row.auto_close,
       allowEarlyClose: row.allow_early_close,
@@ -569,6 +580,11 @@ async function applyTransition(
       // A contract paused past its billing date resumes as due today, never
       // with a date in the past that would bill several cycles at once.
       patch.nextBillingDate = latestIso(row.next_billing_date ?? row.start_date, todayIso());
+      // Stamp the first activation only; renewal keeps the original date so the
+      // question "did this contract ever run?" stays answerable for its lifetime.
+      if (row.activated_at === null) {
+        patch.activatedAt = new Date();
+      }
     }
     if (next === 'Closed') {
       patch.closedAt = new Date();
@@ -656,12 +672,78 @@ export function resumeSubscription(
   return performLifecycle(id, 'Active', requester, reason);
 }
 
-export function earlyCloseSubscription(
+/**
+ * Closing early is only meaningful for a contract that is already in force.
+ * Draft and Quotation rows are cancelled by staff, or declined by the customer
+ * through `declineQuotation`, so this action refuses them by name.
+ */
+export async function earlyCloseSubscription(
   id: number,
   requester: Requester,
   reason?: string,
 ): Promise<SubscriptionDto> {
-  return performLifecycle(id, 'Closed', requester, reason);
+  return withTransaction(async (client) => {
+    const row = await loadForAction(id, requester, client);
+
+    if (row.status !== 'Active' && row.status !== 'Paused') {
+      const message = `Only an active subscription can be closed early; this one is ${row.status}.`;
+      throw new ValidationError(message, [
+        {
+          field: 'status',
+          message:
+            row.status === 'Quotation'
+              ? 'Decline the quotation instead, or ask Brightloop to cancel it.'
+              : 'A contract that has not started yet is cancelled by Brightloop, not closed.',
+        },
+      ]);
+    }
+
+    return applyTransition(row, 'Closed', requester, client, { reason });
+  });
+}
+
+/**
+ * The customer's side of a quotation: accept it, or decline it. Both are tenant
+ * checked by `loadForAction`, so a customer can only ever answer their own
+ * quotation, and an accepted quotation lands on Confirmed — the state the team
+ * then activates on the start date. Confirmed is deliberately not Active: the
+ * progression bar in the brief has to show the confirmation step.
+ */
+async function performQuotationDecision(
+  id: number,
+  decision: 'accept' | 'decline',
+  requester: Requester,
+  reason: string | undefined,
+): Promise<SubscriptionDto> {
+  return withTransaction(async (client) => {
+    const row = await loadForAction(id, requester, client);
+
+    if (row.status !== 'Quotation') {
+      const message = `Only a quotation can be ${decision === 'accept' ? 'accepted' : 'declined'}; this contract is ${row.status}.`;
+      throw new ValidationError(message, [{ field: 'status', message }]);
+    }
+
+    return applyTransition(row, decision === 'accept' ? 'Confirmed' : 'Closed', requester, client, {
+      reason,
+      action: decision === 'accept' ? 'QUOTATION_ACCEPTED' : 'QUOTATION_DECLINED',
+    });
+  });
+}
+
+export function acceptQuotation(
+  id: number,
+  requester: Requester,
+  reason?: string,
+): Promise<SubscriptionDto> {
+  return performQuotationDecision(id, 'accept', requester, reason);
+}
+
+export function declineQuotation(
+  id: number,
+  requester: Requester,
+  reason?: string,
+): Promise<SubscriptionDto> {
+  return performQuotationDecision(id, 'decline', requester, reason);
 }
 
 export async function renewSubscription(

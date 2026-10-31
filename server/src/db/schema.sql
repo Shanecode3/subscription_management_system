@@ -285,6 +285,9 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     tax_rule_id         INT         REFERENCES tax_rules(id) ON DELETE RESTRICT,
     paused_at           TIMESTAMPTZ,
     closed_at           TIMESTAMPTZ,
+    -- First moment the contract actually went live. A contract closed before it
+    -- ever reached Active was cancelled, not run out, so it cannot be renewed.
+    activated_at        TIMESTAMPTZ,
     notes               TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -303,6 +306,26 @@ DROP TRIGGER IF EXISTS trg_subscriptions_updated_at ON subscriptions;
 CREATE TRIGGER trg_subscriptions_updated_at
     BEFORE UPDATE ON subscriptions
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- Incremental migration for databases created before activated_at existed.
+-- The guard makes this a one-time step: once the column is there the block is a
+-- no-op, so re-running db:init never stamps a contract that was declined before
+-- it started and must stay non-renewable.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+          FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'subscriptions'
+           AND column_name = 'activated_at'
+    ) THEN
+        ALTER TABLE subscriptions ADD COLUMN activated_at TIMESTAMPTZ;
+        UPDATE subscriptions
+           SET activated_at = COALESCE(start_date::timestamptz, updated_at)
+         WHERE status IN ('Active', 'Paused', 'Closed');
+    END IF;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- 11. subscription_lines
