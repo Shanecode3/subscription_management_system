@@ -29,10 +29,15 @@ billingRouter.post(
   asyncHandler(async (req, res) => {
     const result = await billingEngine.runBillingDay(req.user!);
 
+    // A run that failed a contract must never report "nothing was due" — that
+    // message hid a real failure once and sent the operator looking in the wrong
+    // place.
     const summary =
-      result.generatedCount === 0
-        ? `No invoices were due. ${result.closedCount} contract(s) auto-closed.`
-        : `Generated ${result.generatedCount} invoice(s), skipped ${result.skippedCount}, closed ${result.closedCount} contract(s).`;
+      result.failedCount > 0
+        ? `Generated ${result.generatedCount} invoice(s), but ${result.failedCount} contract(s) failed — see the run detail below.`
+        : result.generatedCount === 0
+          ? `No invoices were due. ${result.closedCount} contract(s) auto-closed.`
+          : `Generated ${result.generatedCount} invoice(s), skipped ${result.skippedCount}, closed ${result.closedCount} contract(s).`;
 
     return sendSuccess(res, result, 200, summary);
   }),

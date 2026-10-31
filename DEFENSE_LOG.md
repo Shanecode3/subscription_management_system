@@ -1559,3 +1559,20 @@ A disposable PostgreSQL 18 cluster was created on port 5433 (trust auth, separat
 
 2. *After the first Billing Day run, why does a second run report zero generated and zero skipped?* — The engine only loads contracts whose `next_billing_date <= TODAY`, and the first run advanced every due contract past today, so the second run had nothing to evaluate. Idempotency is proven separately: the run never produced a second invoice for an existing `(subscription_id, billing_cycle_date)` pair, which the suite asserts directly in SQL.
 
+---
+
+## 54. Follow-up fix — a failed billing run that claimed nothing was due
+
+**File & Component:** `server/src/routes/billing.routes.ts` (`POST /billing/run-billing-day` summary) and `server/src/services/billing.engine.ts` (per-contract catch block).
+
+**How It Works:** When one contract fails, the run still returns `200` with a `failures[]` entry, and the response message is built from `generatedCount`. With zero invoices generated, the old message read "No invoices were due" — which described the opposite of what had happened and pointed the operator at the queue rather than the failure. The summary now checks `failedCount` first and names how many contracts failed. The catch block also logs the underlying error with `logger.error`, so the real cause (SQL error, constraint violation, connection loss) reaches the server log instead of being flattened into "An unexpected error stopped this invoice."
+
+**Why This Design:** A batch job that partially fails must report three outcomes, not two: nothing to do, work done, and work attempted but refused. Collapsing the third into the first is what made a database-schema problem look like an empty queue. The customer-facing text stays short and non-technical; the operator-facing detail goes to the log, which is the right place for a stack trace and the wrong place for a UI banner.
+
+**Likely Evaluator Q&A**
+
+1. *The failure we saw was `column "tax_rule_id" of relation "invoice_lines" does not exist`. What causes that?* — The database had been created from an earlier milestone's schema and never re-initialised, so the table predated the tax-snapshot columns. `schema.sql` carries an upgrade path (`ALTER TABLE … ADD COLUMN IF NOT EXISTS`), so re-running `npm run db:init` adds the missing columns and billing succeeds without touching existing rows.
+
+2. *Why does a failed contract not fail the whole run?* — Billing Day is a batch over every due contract; one bad row should not withhold invoices from the other hundred. Each contract is billed in its own transaction, so a failure rolls back only that contract — its `next_billing_date` stays put and it will be retried on the next run.
+
+

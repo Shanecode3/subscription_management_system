@@ -12,6 +12,7 @@ import type {
 import type { BillingInterval } from '../utils/catalog.validators';
 import { dueDateFor, todayIso } from '../utils/dates';
 import { AppError } from '../utils/errors';
+import { logger } from '../utils/logger';
 import { toAmount } from '../utils/money';
 import {
   claimDiscountUse,
@@ -565,6 +566,12 @@ export async function runBillingDay(requester: Requester): Promise<BillingRunRes
             ? error.message
             : 'An unexpected error stopped this invoice. The rest of the run continued.',
       });
+      // The customer-facing message is deliberately generic, but the operator
+      // needs the real cause in the log to fix whatever blocked the invoice.
+      logger.error(
+        `Billing failed for ${row.subscription_number}: ${(error as Error).message}`,
+        error,
+      );
     }
   }
 
