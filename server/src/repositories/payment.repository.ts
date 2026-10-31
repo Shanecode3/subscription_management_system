@@ -1,6 +1,7 @@
 import type { PoolClient, QueryResultRow } from 'pg';
 import { query } from '../db/pool';
 import type { PaymentMethod } from '../utils/payment.validators';
+import { documentNumberExpression } from './document-number';
 
 /**
  * SQL for the payment ledger. Every read joins back to the invoice, the paying
@@ -144,8 +145,7 @@ export async function insertPayment(
        payment_date, reference_note, recorded_by
      )
      VALUES (
-       'PAY-' || to_char(CURRENT_DATE, 'YYYY') || '-' ||
-         lpad(nextval('seq_payment_number')::text, 4, '0'),
+       ${documentNumberExpression('PAY', 'seq_payment_number')},
        $1, $2, $3, $4, $5::date, $6, $7
      )
      RETURNING id, payment_number`,

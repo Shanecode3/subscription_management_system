@@ -1,6 +1,7 @@
 import type { PoolClient, QueryResultRow } from 'pg';
 import { query } from '../db/pool';
 import type { InvoiceStatus } from '../utils/billing.validators';
+import { documentNumberExpression } from './document-number';
 import { buildUpdateSet } from './update-builder';
 
 export interface InvoiceRow extends QueryResultRow {
@@ -303,8 +304,7 @@ export async function insertInvoice(
        subtotal, tax_total, discount_total, total_amount, amount_paid, notes
      )
      VALUES (
-       'INV-' || to_char(CURRENT_DATE, 'YYYY') || '-' ||
-         lpad(nextval('seq_invoice_number')::text, 4, '0'),
+       ${documentNumberExpression('INV', 'seq_invoice_number')},
        $1, $2, $3::date, $4, 'Draft', $5::date, $6::date,
        $7, $8, $9, $10, 0, $11
      )

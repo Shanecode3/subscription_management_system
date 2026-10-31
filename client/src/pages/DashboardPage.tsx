@@ -1,4 +1,15 @@
-import { CalendarDays, CheckCircle2, Database, KeyRound, Mail, ShieldCheck } from 'lucide-react';
+import {
+  CalendarDays,
+  CheckCircle2,
+  Database,
+  KeyRound,
+  LineChart,
+  Mail,
+  PlayCircle,
+  ReceiptText,
+  ShieldCheck,
+} from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { AppShell } from '../components/layout/AppShell';
 import { RoleBadge } from '../components/ui/RoleBadge';
 import { useAuth } from '../lib/auth-context';
@@ -63,6 +74,23 @@ export function DashboardPage() {
           </div>
           <RoleBadge role={user.role} />
         </header>
+
+        {user.role !== 'CUSTOMER' ? (
+          <nav className="flex flex-wrap gap-2" aria-label="Finance shortcuts">
+            <Link to="/finance" className="btn-secondary w-auto">
+              <LineChart className="h-4 w-4" aria-hidden="true" />
+              Finance dashboard
+            </Link>
+            <Link to="/billing" className="btn-secondary w-auto">
+              <PlayCircle className="h-4 w-4" aria-hidden="true" />
+              Billing day
+            </Link>
+            <Link to="/invoices" className="btn-secondary w-auto">
+              <ReceiptText className="h-4 w-4" aria-hidden="true" />
+              Invoice ledger
+            </Link>
+          </nav>
+        ) : null}
 
         <div className="grid gap-5 lg:grid-cols-3">
           <section className="card p-6 lg:col-span-2">

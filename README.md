@@ -89,11 +89,12 @@ These are local seed accounts for evaluation only.
 | `npm run db:create` | Create `brightloop_db` if it does not exist |
 | `npm run db:init` | Apply `src/db/schema.sql` (idempotent) |
 | `npm run db:seed` | Seed the three demo accounts, the catalogue (products + variants), the plans, the quotation templates and, when none exist yet, two demo subscriptions |
+| `npm run db:seed:perf` | Generate the performance dataset (140 customers, 1,050 subscriptions, 2,700 invoices, 1,847 payments), benchmark the dashboard SQL with `EXPLAIN ANALYZE`; add `-- --reset` to rebuild it |
 | `npm run db:setup` | All three of the above, in order |
 
 ---
 
-## API surface (Milestones 1–5)
+## API surface (Milestones 1–6)
 
 Base path: `/api/v1`
 
@@ -152,6 +153,8 @@ Base path: `/api/v1`
 | `POST` | `/payments` | Admin, Staff — records a receipt and reconciles the invoice in one transaction |
 | `GET` | `/billing/pending` | Admin, Staff — due contracts, totals and auto-closes |
 | `POST` | `/billing/run-billing-day` | Admin, Staff — idempotent invoice generation |
+| `GET` | `/finance/dashboard` | Admin, Staff — KPI summary; filter by `startDate`, `endDate`, `planId`, `customerId`, `limit` |
+| `GET` | `/finance/filter-options` | Admin, Staff — plans and customers that actually have contracts |
 
 Responses use one envelope everywhere:
 
@@ -167,16 +170,16 @@ Responses use one envelope everywhere:
 ```
 server/src/
   config/      environment parsing (fails fast on missing values)
-  db/          schema.sql, pool, create/init/seed scripts
-  repositories/  SQL only (products, plans, templates, subscriptions, invoices, payments, tax, discounts, users, audit)
-  services/      business rules only (incl. billing engine, invoice actions, payment reconciliation, discount evaluation)
+  db/          schema.sql, pool, create/init/seed scripts, performance seed
+  repositories/  SQL only (products, plans, templates, subscriptions, invoices, payments, tax, discounts, users, finance, audit)
+  services/      business rules only (incl. billing engine, invoice actions, payment reconciliation, discount evaluation, finance dashboard)
   middleware/    auth, validation, errors, request logging
   routes/        HTTP surface only
   utils/         errors, validators, JWT, logger, response, money, params, dates
 client/src/
   lib/           api client, auth context, types, formatting, navigation, status maps, hooks
   components/    ui primitives, layout, catalog forms, billing forms, subscription stepper
-  pages/         auth screens, dashboard, catalog, subscriptions, billing day, invoices, print, portal
+  pages/         auth screens, dashboard, finance dashboard, catalog, subscriptions, billing day, invoices, print, portal
 ```
 
 Dependency direction is one way: `routes → services → repositories → db`. Services never build SQL, repositories never decide permissions, and routes never contain business rules.

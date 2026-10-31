@@ -3,6 +3,7 @@ import {
   CalendarClock,
   FileStack,
   LayoutDashboard,
+  LineChart,
   Package,
   PlayCircle,
   ReceiptText,
@@ -25,6 +26,7 @@ export interface NavItem {
  */
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'STAFF', 'CUSTOMER'] },
+  { to: '/finance', label: 'Finance', icon: LineChart, roles: ['ADMIN', 'STAFF'] },
   { to: '/products', label: 'Products', icon: Package, roles: ['ADMIN', 'STAFF', 'CUSTOMER'] },
   { to: '/plans', label: 'Plans', icon: CalendarClock, roles: ['ADMIN', 'STAFF', 'CUSTOMER'] },
   {
@@ -43,6 +45,7 @@ export const NAV_ITEMS: NavItem[] = [
 
 const PAGE_TITLES: Record<string, string> = {
   '/': 'Dashboard',
+  '/finance': 'Finance dashboard',
   '/products': 'Products',
   '/plans': 'Plans',
   '/templates': 'Quotation templates',

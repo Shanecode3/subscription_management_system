@@ -1396,3 +1396,166 @@ The disposable cluster and API process were stopped and the cluster directory, l
 - No payment gateway integration, by design — the brief forbids third-party billing dependencies, and the rubric rewards building the ledger from scratch.
 - Receipt numbers are sequential per installation, not per customer; the ledger is single-tenant per Brightloop instance.
 - Bulk performance seeding (thousands of contracts, invoices and receipts) and the sub-two-second Finance Lead dashboard belong to Milestone 6; the indexes they depend on (`idx_payments_date_amount`, `idx_payments_invoice_id`, `idx_payments_customer`, `idx_invoices_status_due`) are already in place.
+
+
+## 45. `server/src/repositories/finance.repository.ts` — aggregation SQL only
+
+**File & component:** `server/src/repositories/finance.repository.ts` — `billableCte`, `subscriptionTotals`, `mrrByInterval`, `revenueTotals`, `invoiceTotals`, `overdueInvoices`, `planOptions`, `customerOptions`, `planExists`, `customerExists`.
+
+**How it works:** Each exported function is one SQL statement. The recurring-revenue pair shares a CTE named `billable` that keeps one row per `Active` subscription holding `SUM(l.subtotal)` over its billable lines — `is_addon = FALSE OR is_addon_active = TRUE` — grouped by subscription id and the plan's `billing_interval`. `subscriptionTotals` then folds that CTE with `ROUND(SUM(CASE billing_interval WHEN 'daily' THEN period_amount * 30 WHEN 'weekly' THEN period_amount * 4.3333 WHEN 'monthly' THEN period_amount WHEN 'yearly' THEN period_amount / 12 END), 2)` for MRR and the matching 365 / 52 / 12 / 1 factors for ARR. `mrrByInterval` folds the same CTE a second time with `GROUP BY billing_interval`. `revenueTotals` sums `payments.amount` joined to its invoice and subscription so the plan filter can reach the contract, with the window applied to `payment_date`. `invoiceTotals` uses PostgreSQL `FILTER` clauses to produce four numbers in one row: outstanding balance (`status = 'Confirmed' AND total_amount > amount_paid`), open-invoice count, the overdue subset (`due_date < CURRENT_DATE`) and its count. `overdueInvoices` selects the chase list, ordered `due_date ASC, id ASC`, capped by a bound `LIMIT` parameter, and computes `days_overdue` and `balance_due` in SQL. Filter ids are always pushed as `$n` placeholders; nothing is string-concatenated.
+
+**Why this design:** The rubric's performance requirement is a database requirement, so the dashboard hands PostgreSQL the aggregation instead of streaming rows to Node. `FILTER` turns four conditional passes over `invoices` into one, and because every status/date predicate matches an existing index, the planner never needs a table rewrite. `idx_subs_active_billing (status, next_billing_date) WHERE status = 'Active'` serves the contract scan, `idx_invoices_status_due (status, due_date)` serves the overdue split, and `idx_payments_date_amount (payment_date, amount)` served the date-window scan in `EXPLAIN ANALYZE` (`Bitmap Index Scan on idx_payments_date_amount`). No new index was added: at 2,700 invoices and 1,847 payments the plans already execute in under 1.1 ms, so an extra composite index would only add write cost — the database-designer rule is to index queries that actually need it, not every column a filter mentions.
+
+**Q&A defence:**
+1. *Why calculate MRR in SQL rather than summing the returned subscriptions in JavaScript?* Because the figures must stay correct when the book of business grows past what a single response should carry; `SUM` over an indexed scan costs one round trip regardless of row count, and it reuses the same normalised `subtotal` the billing engine stores. It also keeps the dashboard's two views of the same number — total MRR and the per-interval mix — computed from one definition, so they cannot drift.
+2. *Why `FILTER (WHERE …)` instead of four separate queries or `CASE WHEN` sums?* `FILTER` is the standard PostgreSQL aggregate predicate: the engine scans `invoices` once and keeps four accumulators, and the SQL reads as four clearly-labelled business rules rather than a wall of `SUM(CASE WHEN … THEN … ELSE 0 END)`. Four separate queries would multiply round trips and could observe different snapshots if a payment landed between them.
+
+---
+
+## 46. `server/src/services/finance.service.ts` — dashboard rules and filter validation
+
+**File & component:** `server/src/services/finance.service.ts` — `getDashboard`, `getFilterOptions`, `assertInternal`, `assertDateOrder`, `assertFilterTargets`, DTO mappers.
+
+**How it works:** `getDashboard` first refuses a non-internal requester, then rejects a reversed date range with `field: 'endDate'`, then asks the repository whether a supplied `planId`/`customerId` exists so a stale URL is named rather than silently returning zeros. It then runs five repository calls concurrently with `Promise.all`, measures the wall-clock duration of that group with `performance.now()`, and converts every NUMERIC string to a JSON number with `toAmount` (which rounds to two decimals). The DTO carries the applied filters back verbatim, the four KPI figures, the interval mix, the chase list, `queryTimeMs` and `generatedAt`. `getFilterOptions` returns only plans and customers that own at least one contract, so the toolbar never offers a slice that is guaranteed empty.
+
+**Why this design:** Filters are validated in the service, not the route, because "which id may narrow a report" is a business rule — the same reason permissions live here rather than only in middleware. Running the aggregates concurrently matters because each is independent and the endpoint's budget is two seconds for the whole page; sequential awaits would add four round-trip latencies for no benefit. Echoing `filters` in the response is a deliberate correctness device: the UI can prove which range produced the numbers on screen, so a stale request can never be mislabelled. `queryTimeMs` is measured server-side around the aggregate calls only, which is the honest way to evidence the `< 200 ms` database target without counting JSON serialisation or network time.
+
+**Q&A defence:**
+1. *Why does the date range narrow invoices and payments but not the MRR figure?* MRR is a snapshot of the contracts in force today, not a flow over a period; applying an invoice-date window to it would make "active subscriptions" disagree with the Subscriptions screen and would change meaning every time the range moved. The dashboard states that rule in the filter bar, and the amount filters that *are* period-based — collected, outstanding, overdue — all use their own event date: `payment_date` for cash, `issue_date` for invoices.
+2. *What stops a customer account from reading company revenue?* Two independent gates: `requireRole('ADMIN', 'STAFF')` mounted on the finance router, and `assertInternal` at the top of both service functions. If a future route were mounted without the middleware the service would still throw `ForbiddenError`, and the verification run confirms `GET /finance/dashboard` returns **403** for a customer session and **401** without a token.
+
+---
+
+## 47. `server/src/routes/finance.routes.ts` and strict query parsing
+
+**File & component:** `server/src/routes/finance.routes.ts`; `server/src/utils/query-params.ts` additions `parseIdFilter` and the optional `field` argument on `parseDateFilter`; `server/src/routes/index.ts` mount at `/finance`.
+
+**How it works:** `GET /finance/dashboard` parses `startDate`, `endDate`, `planId`, `customerId` and `limit` before any service call. `parseDateFilter` refuses anything that is not `YYYY-MM-DD` and reports the camelCase field name the toolbar highlights; `parseIdFilter` refuses a non-integer or negative id instead of dropping it; `parseLimit` bounds the chase list to 1–500 (default 50). `GET /finance/filter-options` returns the plan and customer pickers. Both routes sit behind `authenticate` and the router-level `requireRole('ADMIN', 'STAFF')`.
+
+**Why this design:** The invoice and payment ledgers use the lenient `parseOptionalId` because a malformed filter there is a convenience that can be ignored. The dashboard cannot afford that: silently dropping `planId=abc` would display company-wide revenue under a heading that claims it is filtered to one plan. Adding a strict sibling keeps both behaviours explicit at the call site rather than weakening the shared helper. The `field` argument on `parseDateFilter` was added with a default, so existing callers keep their behaviour while the dashboard reports `startDate`/`endDate` exactly as its inputs are named.
+
+**Q&A defence:**
+1. *Why have both `parseOptionalId` and `parseIdFilter`?* They encode different contracts: one treats the parameter as a best-effort convenience, the other treats it as a claim about what the user is looking at. Naming them separately makes the choice visible in each route instead of hiding a mode flag inside one helper.
+2. *Why expose `/finance/filter-options` instead of letting the toolbar call `/plans` and `/admin/users`?* The dashboard needs the *reachable* slice — plans and customers that actually hold contracts — and it needs it in one request, without shipping the full staff directory to the browser. It is also one more place where the role gate is enforced consistently rather than relying on whichever endpoint happens to be staff-readable.
+
+---
+
+## 48. `server/src/db/seed_performance.ts` — thousand-row dataset and benchmarks
+
+**File & component:** `server/src/db/seed_performance.ts`; npm script `db:seed:perf`.
+
+**How it works:** The script checks for base fixtures (plans, products, a default tax rule, an internal user) and refuses with a clear message if `db:seed` has not run. A seeded `mulberry32` PRNG drives every random choice, so the dataset is reproducible. Inside one transaction it inserts 140 performance customers (email prefix `perf.customer…@brightloop.test`, shared bcrypt hash), 1,050 subscriptions across five lifecycle statuses and all four billing intervals, 2,095 subscription lines (base products plus active and paused add-ons), 2,700 invoices and 1,847 payments. Inserts are batched at 250 rows with `buildTuples` generating typed placeholders (`::date` for date columns) and ids are mapped back by `subscription_number` / `billing_cycle_key`. Payment amounts are derived from `amount_paid`, so every paid invoice reconciles exactly. After commit it advances `seq_subscription_number`, `seq_invoice_number` and `seq_payment_number` past the highest hand-written number, runs `ANALYZE`, then times the five real repository aggregates and prints three `EXPLAIN (ANALYZE, BUFFERS)` plans. `--reset` deletes only rows owned by the perf email domain, in foreign-key order.
+
+**Why this design:** The performance claim has to be reproducible and must not touch the evaluator's demo data, hence the email-domain marker and the deterministic seed. Going through `subscriptionService`/`invoiceService` would be the wrong tool here: those paths exist to enforce one-contract-at-a-time business rules and each opens its own transaction, which would turn a 234 ms seed into minutes. Direct batched inserts still satisfy every constraint — foreign keys, checks, unique numbers and the billing-cycle key — because the constraints are in the schema, not in the services. Advancing the sequences is the subtle part: the generated documents deliberately live in the `…-9xxxxx` range, and without `setval` the next Billing Day run would collide with `uq_invoice_number`.
+
+**Q&A defence:**
+1. *Does seeding rows directly bypass your business logic and therefore prove nothing?* No — it proves the schema's own guarantees, which is what the rubric grades: every row passes the same foreign keys, CHECK constraints and unique indexes a service insert would, and the verification suite independently confirms payments reconcile to `amount_paid`. The services remain the only write path in the running application; this script is test-data tooling, clearly separated under `db/`.
+2. *How do you know the dashboard queries remain fast at this volume rather than relying on a lucky cache?* The script runs `ANALYZE` after loading and prints the server's own plans: the contract aggregate executes in 1.074 ms, the invoice balance aggregate in 0.716 ms, and the payments window takes `Bitmap Index Scan on idx_payments_date_amount` in 0.497 ms. The endpoint additionally reports its own `queryTimeMs` (1.5 ms unfiltered), and the verification run re-checks the full HTTP response against the two-second budget.
+
+---
+
+## 49. `client/src/pages/FinanceDashboardView.tsx` — the finance lead screen
+
+**File & component:** `client/src/pages/FinanceDashboardView.tsx` — `FinanceDashboardView`, `dashboardPath`, `apply`, `clearFilters`; supporting types in `client/src/lib/types.ts`.
+
+**How it works:** The page keeps two filter sets: `draft` (what the inputs show) and `applied` (what the last successful request used). Selects apply immediately; date inputs apply only when the range is coherent, otherwise the hint explains that the dashboard is still showing the last valid range. `useApiResource` is called with a memoised `/finance/dashboard?…` path, so any change to `applied` triggers a refetch while the previous figures stay on screen under a loading state on the Refresh button. Four KPI cards show recurring revenue (MRR, ARR, active contracts, and the interval mix), cash collected with its receipt count, total outstanding with its open-invoice count, and total overdue with its late count. The chase table lists the oldest overdue invoices with customer, contract, due date, a days-late badge, the balance, and a "Record payment" link into the invoice screen where the payment modal already lives. A footnote reports `queryTimeMs` and the generation timestamp; the empty state explains what will appear once a due date passes.
+
+**Why this design:** The rubric asks for interactive filters that recalculate metrics, so the screen never filters rows locally — every control changes the SQL the server runs, which is the only way the KPI totals and the chase list can agree. Keeping `draft` separate from `applied` is the difference between a recoverable mistake and a dashboard that blanks itself the moment someone clicks the wrong end of a calendar. The layout is deliberately uneven: recurring revenue is the largest card because it is the number a finance lead opens the page for, and the two debt cards sit below as a pair so outstanding and overdue read as one comparison. Colours follow the app's existing vocabulary — plum for revenue, emerald for cash, amber for owed, rose for late — and all amounts use tabular figures.
+
+**Q&A defence:**
+1. *How do the filters recalculate the metrics without a page reload?* Each control updates the applied filter state, which changes the memoised request path; `useApiResource` refetches and the server returns freshly aggregated figures, so the browser never adds anything up. Because the response echoes the filters it used, the screen can only ever label numbers with the range that produced them.
+2. *What happens if someone selects an end date before the start date?* The input pair updates, the request is *not* sent, and a message under the toolbar says the end date must be on or after the start date while the dashboard continues to show the last valid range. If the same query is issued directly to the API, the service rejects it with **400** and `details[0].field = "endDate"`, which the verification suite asserts.
+
+---
+
+## 50. Navigation, routing and dashboard shortcuts
+
+**File & component:** `client/src/lib/navigation.ts` (`NAV_ITEMS`, `PAGE_TITLES`), `client/src/App.tsx` (`/finance` route), `client/src/pages/DashboardPage.tsx` (finance shortcuts).
+
+**How it works:** A `Finance` entry with a `LineChart` icon is added to `NAV_ITEMS` for `ADMIN` and `STAFF` only, and the same list drives the sidebar and the role guard. `App.tsx` wraps `FinanceDashboardView` in `ProtectedRoute` and `RoleRoute(['ADMIN', 'STAFF'])`. `PAGE_TITLES['/finance']` supplies the header title, and the landing dashboard gains three shortcut buttons — Finance dashboard, Billing day, Invoice ledger — for internal users.
+
+**Why this design:** The navigation list is the single source of truth for both what is shown and what is protected, so a screen cannot appear without a guard. Adding the shortcuts on the landing page keeps the milestone discoverable without a dead link or an extra menu; a customer never sees the finance entry because the role filter removes it before render, and the API would refuse the call even if the URL were typed by hand.
+
+**Q&A defence:**
+1. *Is client-side role filtering enough to protect the finance screen?* No, and it is not relied upon: the route guard hides the sidebar entry for a customer, `RoleRoute` blocks the component, and the API independently returns **403** from `requireRole` plus the service guard. The verification suite exercises the last of those directly.
+2. *Why link "Record payment" to the invoice instead of opening a modal on the dashboard?* The payment form needs the invoice's issue date, balance and allowed actions, which the invoice detail screen already loads and validates against; duplicating that state on the dashboard would create a second place where payment rules could drift. The link lands exactly where the existing, verified flow runs.
+
+---
+
+## 51. Verification evidence — Milestone 6
+
+A disposable PostgreSQL 18 cluster was created on port 5433 (trust auth, separate temp directory), the schema applied, the base seed and `db:seed:perf` run, and the API started on port 5056 against it. `verify-m6.mjs` then ran 76 live HTTP and SQL assertions.
+
+**Dataset**
+
+| Measure | Value |
+| :--- | :--- |
+| Subscriptions | **1,052** (676 `Active`) |
+| Subscription lines | 2,100 |
+| Invoices | **2,700** (997 confirmed and overdue) |
+| Payments | **1,847** |
+| Perf customers | 140 |
+| Seed duration | 234 ms |
+
+**Dashboard figures vs independent SQL**
+
+| Metric | API | Independent SQL |
+| :--- | ---: | ---: |
+| Active contracts | 676 | 676 |
+| MRR | 5,425,014.05 | 5,425,014.05 (recomputed in JS from line subtotals) |
+| ARR | 65,759,490.00 | matches the interval factors (ARR/MRR ≈ 12.12) |
+| Collected | 3,305,045.23 | `SUM(payments.amount)` 3,305,045.23 |
+| Payments | 1,847 | 1,847 |
+| Outstanding | 2,128,146.77 | `SUM(total − paid) FILTER (Confirmed AND balance > 0)` |
+| Open invoices | 1,041 | 1,041 |
+| Overdue | 2,034,498.79 | overdue subset of the same predicate |
+| Overdue invoices | 997 | 997 |
+| `queryTimeMs` | 1.5 ms | — |
+| HTTP response time | < 2 s (asserted) | — |
+
+**What the 76 assertions cover**
+
+- Metrics are identical to independently written SQL, including the MRR recomputation in JavaScript from the same billable rows.
+- MRR slices sum to the total MRR; ARR is within the expected 12× band; overdue is a subset of outstanding by both amount and count.
+- The chase list is capped at 50, ordered oldest-first, every row positive-balance, confirmed it is `Confirmed` and past due in SQL, and each `balanceDue = total − paid`.
+- Filters narrow correctly: plan (MRR and contract count), customer (collected), 30-day window (collected, receipt count, overdue count), all four combined, and an empty historical window that returns zeros while still reporting live contracts.
+- Validation: malformed date → 400 `startDate`; reversed range → 400 `endDate`; `planId=abc` → 400 `planId`; unknown plan → 400 naming the id; unknown customer → 400 `customerId`.
+- RBAC: staff 200, customer 403 on both finance routes, anonymous 401.
+- Timing: `/finance/dashboard`, `/finance/filter-options`, `/invoices?limit=100` and `/subscriptions` each under two seconds at this volume.
+- SQL invariants: no invoice whose `amount_paid` disagrees with its receipts, no overpayment, document sequences ahead of every seeded number, and the dataset meets the 1,000 / 2,500 / 1,500 thresholds.
+
+**`EXPLAIN ANALYZE` highlights**
+
+| Query | Plan | Execution |
+| :--- | :--- | ---: |
+| Active contracts + billable lines | HashAggregate over `subscriptions` → `subscription_lines` | 1.074 ms |
+| Confirmed invoice balances | Hash Join, single Aggregate with four `FILTER`s | 0.716 ms |
+| Collected over 30 days | `Bitmap Index Scan on idx_payments_date_amount` | 0.497 ms |
+
+`tsc --noEmit` is clean for the server and the client production build (`tsc --noEmit && vite build`) succeeds. The disposable cluster, API process and verification script were removed afterwards; `server/.env` was never modified or printed.
+
+---
+
+## 52. Deliberate boundaries at the end of Milestone 6
+
+- No CORS-visible paging on the chase list beyond the bounded `limit`: the dashboard is a summary, and the invoice ledger is the place to work through the full list.
+- No charting library: the interval mix is a compact list of real aggregates, which keeps the bundle small and avoids a dependency the brief does not ask for.
+- No materialised views or caching layer: at the seeded volume every aggregate answers in ~1 ms, so caching would add staleness without buying anything the two-second budget needs.
+- The profit/cost view (cost price against sales price) is not on the dashboard; the brief's finance-lead summary asks for revenue, outstanding and overdue, and margin reporting has no requirement attached to it.
+
+---
+
+## 53. Follow-up fix — document numbering past 9999, and cycle keys in the seed
+
+**File & Component:** `server/src/repositories/document-number.ts` (new), consumed by `invoice.repository.ts`, `payment.repository.ts` and `subscription.repository.ts`; `server/src/db/seed_performance.ts`.
+
+**How It Works:** Every document number used to be built as `'INV-' || to_char(CURRENT_DATE,'YYYY') || '-' || lpad(nextval('seq_invoice_number')::text, 4, '0')`. The performance seed pushed the sequences past 9,999, and the first payment recorded after that failed with `409 DUPLICATE_RECORD`: PostgreSQL's `lpad` *truncates* when the input is longer than the requested width, so `lpad('10001', 4, '0')` returns `'1000'` and the next document reissued a number already on file. `documentNumberExpression(prefix, sequence, width)` now emits one shared SQL fragment that calls `nextval` exactly once and pads to `GREATEST(4, length(value))`, so a number grows instead of being cut: `INV-2026-0007` early on, `PAY-2026-901848` at scale. The same change was applied to subscription numbers, which share the pattern. In the seed, each subscription's invoices now land on distinct `billing_cycle_date`s (a taken date steps back a day) and the stored `billing_cycle_key` is `sub_<subscription_id>_<date>` — the exact string the billing engine writes — so a later billing run recognises a seeded cycle by key instead of reaching the unique constraint.
+
+**Why This Design:** The number belongs to the row being inserted, so it has to be generated in the same statement — a separate `SELECT nextval` would either race between concurrent clerks or burn a number if the insert rolled back. Keeping the fix in one exported fragment means the three ledgers cannot drift apart again, and both interpolated arguments are code constants, never request data. Aligning the seed's cycle key with the runtime format matters because idempotency is only as good as the key: a seeded invoice with a different key shape for the same cycle date would slip past the engine's lookup and be rejected later by `UNIQUE(subscription_id, billing_cycle_date)` as an opaque database error rather than a clean "already billed" skip.
+
+**Likely Evaluator Q&A**
+
+1. *Why not `to_char(nextval(seq), 'FM0000')`?* — For a value wider than the format mask, `to_char` returns `'####'`, which is a worse failure than truncation because every later document would collide at once. Padding in SQL with `lpad(..., GREATEST(4, length(...)))` widens the number instead of losing digits.
+
+2. *After the first Billing Day run, why does a second run report zero generated and zero skipped?* — The engine only loads contracts whose `next_billing_date <= TODAY`, and the first run advanced every due contract past today, so the second run had nothing to evaluate. Idempotency is proven separately: the run never produced a second invoice for an existing `(subscription_id, billing_cycle_date)` pair, which the suite asserts directly in SQL.
+

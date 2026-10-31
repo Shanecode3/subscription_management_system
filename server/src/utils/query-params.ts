@@ -17,14 +17,40 @@ export function parseOptionalId(raw: unknown): number | undefined {
 }
 
 /** ISO calendar date ('YYYY-MM-DD'), forwarded to SQL with an explicit cast. */
-export function parseDateFilter(raw: unknown, label: string): string | undefined {
+export function parseDateFilter(
+  raw: unknown,
+  label: string,
+  field = label.toLowerCase(),
+): string | undefined {
   if (raw === undefined || raw === '') return undefined;
   if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw) || Number.isNaN(Date.parse(raw))) {
     throw new ValidationError(`${label} must be a date in YYYY-MM-DD format.`, [
-      { field: label.toLowerCase(), message: 'Use YYYY-MM-DD, for example 2026-10-31.' },
+      { field, message: 'Use YYYY-MM-DD, for example 2026-10-31.' },
     ]);
   }
   return raw;
+}
+
+/**
+ * Strict id filter. Unlike `parseOptionalId`, which quietly drops a malformed
+ * value because the invoice ledger treats the filter as a convenience, a
+ * dashboard filter that is silently ignored would show the finance lead the
+ * whole company's figures under a heading that says it is filtered. Here a
+ * malformed value is refused with the field the toolbar highlights.
+ */
+export function parseIdFilter(
+  raw: unknown,
+  label: string,
+  field: string,
+): number | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new ValidationError(`${label} must be a whole number greater than zero.`, [
+      { field, message: 'Pick a value from the list.' },
+    ]);
+  }
+  return parsed;
 }
 
 /** Row cap, bounded so one request cannot ask for the whole ledger. */

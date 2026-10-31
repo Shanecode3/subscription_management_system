@@ -4,6 +4,7 @@ import { RoleRoute } from './components/layout/RoleRoute';
 import { BillingDayView } from './pages/BillingDayView';
 import { DashboardPage } from './pages/DashboardPage';
 import { DiscountsPage } from './pages/DiscountsPage';
+import { FinanceDashboardView } from './pages/FinanceDashboardView';
 import { InvoiceDetailView } from './pages/InvoiceDetailView';
 import { InvoicesPage } from './pages/InvoicesPage';
 import { NotFoundPage } from './pages/NotFoundPage';
@@ -61,6 +62,17 @@ export default function App() {
         element={
           <ProtectedRoute>
             <DashboardPage />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/finance"
+        element={
+          <ProtectedRoute>
+            <RoleRoute roles={['ADMIN', 'STAFF']}>
+              <FinanceDashboardView />
+            </RoleRoute>
           </ProtectedRoute>
         }
       />

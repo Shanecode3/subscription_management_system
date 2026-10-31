@@ -2,6 +2,7 @@ import type { PoolClient, QueryResultRow } from 'pg';
 import { query } from '../db/pool';
 import type { BillingInterval } from '../utils/catalog.validators';
 import type { SubscriptionStatus } from '../utils/subscription.validators';
+import { documentNumberExpression } from './document-number';
 import { buildUpdateSet } from './update-builder';
 
 export interface SubscriptionRow extends QueryResultRow {
@@ -231,8 +232,7 @@ export async function insertSubscription(
        start_date, expiry_date, payment_terms, next_billing_date, notes
      )
      VALUES (
-       'SUB-' || to_char(CURRENT_DATE, 'YYYY') || '-' ||
-         lpad(nextval('seq_subscription_number')::text, 4, '0'),
+       ${documentNumberExpression('SUB', 'seq_subscription_number')},
        $1, $2, $3, 'Draft', $4, $5, $6, $4, $7
      )
      RETURNING id, subscription_number`,

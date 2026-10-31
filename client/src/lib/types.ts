@@ -373,3 +373,73 @@ export interface BillingRunResult {
   failures: { subscriptionId: number; subscriptionNumber: string; message: string }[];
   closed: BillingClosingItem[];
 }
+
+// ---------------------------------------------------------------------------
+// Finance lead dashboard (Milestone 6)
+// ---------------------------------------------------------------------------
+
+export interface FinanceIntervalSlice {
+  billingInterval: BillingInterval;
+  subscriptions: number;
+  mrr: number;
+}
+
+export interface FinanceOverdueInvoice {
+  id: number;
+  invoiceNumber: string;
+  customerId: number;
+  customerName: string;
+  customerEmail: string;
+  customerCompany: string | null;
+  subscriptionNumber: string;
+  planName: string;
+  issueDate: string;
+  dueDate: string;
+  daysOverdue: number;
+  totalAmount: number;
+  amountPaid: number;
+  balanceDue: number;
+}
+
+export interface FinanceFilters {
+  startDate: string | null;
+  endDate: string | null;
+  planId: number | null;
+  customerId: number | null;
+}
+
+export interface FinanceDashboard {
+  filters: FinanceFilters;
+  activeSubscriptions: number;
+  mrr: number;
+  arr: number;
+  totalRevenueCollected: number;
+  totalPayments: number;
+  totalOutstandingOwed: number;
+  openInvoiceCount: number;
+  totalOverdueOwed: number;
+  overdueInvoiceCount: number;
+  mrrByInterval: FinanceIntervalSlice[];
+  overdueInvoices: FinanceOverdueInvoice[];
+  /** Server-side milliseconds spent on the aggregate queries. */
+  queryTimeMs: number;
+  generatedAt: string;
+}
+
+export interface FinancePlanOption {
+  id: number;
+  name: string;
+  billingInterval: BillingInterval;
+}
+
+export interface FinanceCustomerOption {
+  id: number;
+  name: string;
+  email: string;
+  company: string | null;
+}
+
+export interface FinanceFilterOptions {
+  plans: FinancePlanOption[];
+  customers: FinanceCustomerOption[];
+}
