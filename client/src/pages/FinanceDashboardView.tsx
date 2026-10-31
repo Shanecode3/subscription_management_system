@@ -12,6 +12,8 @@ import {
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/layout/AppShell';
+import { BarList } from '../components/charts/BarList';
+import { ChartLegend, StackedBar, type BarSegment } from '../components/charts/StackedBar';
 import { Alert } from '../components/ui/Alert';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -89,6 +91,27 @@ export function FinanceDashboardView() {
   };
 
   const dashboard = data;
+
+  // Overdue is a subset of what is owed, so the two segments must not overlap:
+  // the amber length is the part that is still inside its payment terms.
+  const owedSegments: BarSegment[] = dashboard
+    ? [
+        {
+          key: 'not-due',
+          label: 'Not yet due',
+          value: Math.max(dashboard.totalOutstandingOwed - dashboard.totalOverdueOwed, 0),
+          color: 'bg-amber-400',
+          display: formatMoney(Math.max(dashboard.totalOutstandingOwed - dashboard.totalOverdueOwed, 0)),
+        },
+        {
+          key: 'overdue',
+          label: 'Already late',
+          value: dashboard.totalOverdueOwed,
+          color: 'bg-rose-400',
+          display: formatMoney(dashboard.totalOverdueOwed),
+        },
+      ]
+    : [];
 
   return (
     <AppShell>
@@ -237,25 +260,28 @@ export function FinanceDashboardView() {
                 </div>
 
                 {dashboard.mrrByInterval.length > 0 ? (
-                  <ul className="mt-5 space-y-2" aria-label="Recurring revenue by billing interval">
-                    {dashboard.mrrByInterval.map((slice) => (
-                      <li
-                        key={slice.billingInterval}
-                        className="flex items-baseline gap-3 border-t border-slate-100 pt-2 first:border-0 first:pt-0"
-                      >
-                        <span className="w-20 text-sm text-slate-600">
-                          {intervalLabel(slice.billingInterval)}
-                        </span>
-                        <span className="flex-1 text-xs text-slate-500">
-                          {slice.subscriptions.toLocaleString()} contract
-                          {slice.subscriptions === 1 ? '' : 's'}
-                        </span>
-                        <span className="text-sm font-semibold tabular-nums text-plum-700">
-                          {formatMoney(slice.mrr)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="mt-5 border-t border-slate-100 pt-4">
+                    <BarList
+                      ariaLabel="Recurring revenue by billing interval"
+                      labelWidth="w-20"
+                      items={dashboard.mrrByInterval.map((slice) => ({
+                        key: slice.billingInterval,
+                        label: intervalLabel(slice.billingInterval),
+                        value: slice.mrr,
+                        display: formatMoney(slice.mrr),
+                      }))}
+                    />
+                    <p className="mt-2.5 text-xs text-slate-500">
+                      {dashboard.mrrByInterval
+                        .map(
+                          (slice) =>
+                            `${intervalLabel(slice.billingInterval)}: ${slice.subscriptions} contract${
+                              slice.subscriptions === 1 ? '' : 's'
+                            }`,
+                        )
+                        .join(' · ')}
+                    </p>
+                  </div>
                 ) : null}
               </article>
 
@@ -296,6 +322,15 @@ export function FinanceDashboardView() {
                 <p className="mt-3 text-xs leading-relaxed text-slate-500">
                   Balance across every confirmed invoice, whether or not it has fallen due yet.
                 </p>
+
+                <div className="mt-4 border-t border-slate-100 pt-3">
+                  <StackedBar
+                    ariaLabel="Money owed, split by whether it is late"
+                    segments={owedSegments}
+                    empty={<p className="text-xs text-slate-500">Nothing is owed right now.</p>}
+                  />
+                  <ChartLegend segments={owedSegments} className="mt-2.5" />
+                </div>
               </article>
 
               <article className="card p-5">

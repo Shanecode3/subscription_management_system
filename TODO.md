@@ -290,6 +290,9 @@
   - [x] Replace the dashboard's three shortcut buttons with one summary card per section (MRR bars, invoice status bar, contract mix, catalogue, discount/tax coverage, next billing queue); each card is a link with a hover state.
   - [x] Add `GET /api/v1/dashboard/summary` so every card is fed by one fixed-size aggregate call instead of client-side summing.
   - [x] Give customers a live portal card (active contracts, next bill, per-contract status) instead of copy, via `/portal/subscriptions`.
+  - [x] Add shared chart primitives (`BarList`, `StackedBar`/`ChartLegend`) and one graphic per screen: MRR and money-owed split on Finance, status mix and billed total on Invoices, lifecycle mix and value by plan on Subscriptions, cost-per-month comparison on Plans, rate comparison on Tax rules, run anatomy on Billing day, headroom by rule on Discounts, products-by-type on the dashboard.
+  - [x] Reset `WELCOME10.current_uses` so the demo shows a clean redemption counter, leaving the discount already stored on past invoices intact.
+  - [x] Fix the horizontal page overflow at phone width caused by the screen-reader `<span>` inside the invoice and subscription table headers.
 
 ---
 

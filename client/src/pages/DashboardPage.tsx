@@ -16,12 +16,23 @@ import {
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/layout/AppShell';
+import { BarList } from '../components/charts/BarList';
+import { ChartLegend, StackedBar, type BarSegment } from '../components/charts/StackedBar';
 import { Alert } from '../components/ui/Alert';
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../lib/auth-context';
 import { cx } from '../lib/cx';
 import { billingSuffix, formatDate, formatMoney, intervalLabel } from '../lib/format';
-import type { DashboardSummary, FinanceDashboard, Role, Subscription } from '../lib/types';
+import { INVOICE_STATUS_COLOR } from '../lib/invoice-status';
+import { SUBSCRIPTION_STATUS_COLOR } from '../lib/subscription-status';
+import type {
+  DashboardSummary,
+  FinanceDashboard,
+  InvoiceStatus,
+  Role,
+  Subscription,
+  SubscriptionStatus,
+} from '../lib/types';
 import { useApiResource } from '../lib/use-api-resource';
 
 const ROLE_CAPABILITIES: Record<Role, { summary: string; items: string[] }> = {
@@ -52,27 +63,10 @@ const ROLE_CAPABILITIES: Record<Role, { summary: string; items: string[] }> = {
 };
 
 /**
- * Status colours are the vocabulary the rest of the app already uses on its
- * badges, repeated here so a slice on a bar and a badge on a table are the same
- * state at a glance. Every slice is labelled in the legend, so colour is never
- * the only thing carrying the meaning.
+ * Product types are a category, not a status, so they get their own fixed
+ * three-hue order rather than borrowing the status palette. Every slice is
+ * labelled in the legend, so colour is never the only thing carrying meaning.
  */
-const INVOICE_STATUS_COLOR: Record<string, string> = {
-  Draft: 'bg-slate-400',
-  Confirmed: 'bg-amber-500',
-  Paid: 'bg-emerald-500',
-  Cancelled: 'bg-rose-400',
-};
-
-const SUBSCRIPTION_STATUS_COLOR: Record<string, string> = {
-  Draft: 'bg-slate-400',
-  Quotation: 'bg-plum-400',
-  Confirmed: 'bg-teal-500',
-  Active: 'bg-emerald-500',
-  Paused: 'bg-amber-500',
-  Closed: 'bg-slate-300',
-};
-
 const PRODUCT_TYPE_COLOR: Record<string, string> = {
   Software: 'bg-plum-600',
   Service: 'bg-teal-600',
@@ -149,82 +143,6 @@ function CardSkeleton() {
       <div className="h-2 w-full animate-pulse rounded-full bg-slate-100" />
       <div className="h-2 w-4/5 animate-pulse rounded-full bg-slate-100" />
     </div>
-  );
-}
-
-/** One labelled magnitude bar: the label names the row, the bar ranks it. */
-function BarRow({
-  label,
-  value,
-  max,
-  display,
-  color,
-}: {
-  label: string;
-  value: number;
-  max: number;
-  display: string;
-  color: string;
-}) {
-  const width = max > 0 ? Math.max(value > 0 ? 4 : 0, Math.round((value / max) * 100)) : 0;
-
-  return (
-    <li className="grid grid-cols-[4.5rem_1fr_auto] items-center gap-3">
-      <span className="truncate text-xs text-slate-600">{label}</span>
-      <span className="h-1.5 rounded-full bg-slate-100">
-        <span
-          className={cx('block h-1.5 rounded-full transition-[width] duration-300', color)}
-          style={{ width: `${width}%` }}
-        />
-      </span>
-      <span className="text-right text-xs font-semibold tabular-nums text-ink">{display}</span>
-    </li>
-  );
-}
-
-interface StatusSlice {
-  label: string;
-  count: number;
-  color: string;
-}
-
-/** A single stacked bar plus its legend — identity is always written out. */
-function StatusBar({ slices, empty }: { slices: StatusSlice[]; empty: string }) {
-  const visible = slices.filter((slice) => slice.count > 0);
-  const total = visible.reduce((sum, slice) => sum + slice.count, 0);
-
-  if (total === 0) {
-    return <p className="text-xs text-slate-500">{empty}</p>;
-  }
-
-  return (
-    <>
-      <div
-        className="flex h-2 gap-0.5 overflow-hidden rounded-full bg-slate-100"
-        role="img"
-        aria-label={visible.map((slice) => `${slice.label}: ${slice.count}`).join(', ')}
-      >
-        {visible.map((slice) => (
-          <span
-            key={slice.label}
-            className={cx('h-full first:rounded-l-full last:rounded-r-full', slice.color)}
-            style={{ flexGrow: slice.count, flexBasis: 0 }}
-          />
-        ))}
-      </div>
-
-      <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
-        {visible.map((slice) => (
-          <li key={slice.label} className="flex items-center gap-1.5 text-xs text-slate-600">
-            <span className={cx('h-2 w-2 rounded-full', slice.color)} aria-hidden="true" />
-            {slice.label}
-            <span className="font-semibold tabular-nums text-ink">
-              {slice.count.toLocaleString()}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </>
   );
 }
 
@@ -326,25 +244,32 @@ export function DashboardPage() {
       .filter((value): value is string => Boolean(value))
       .sort()[0] ?? null;
 
-  const intervalMax = Math.max(0, ...(money?.mrrByInterval.map((slice) => slice.mrr) ?? [0]));
-  const productMax = Math.max(0, ...(stats?.catalogue.products.byType.map((row) => row.count) ?? [0]));
-
-  const subscriptionSlices: StatusSlice[] =
+  const subscriptionSlices: BarSegment[] =
     stats?.subscriptions.byStatus.map((row) => ({
+      key: row.status,
       label: row.status,
-      count: row.count,
-      color: SUBSCRIPTION_STATUS_COLOR[row.status] ?? 'bg-slate-400',
+      value: row.count,
+      color: SUBSCRIPTION_STATUS_COLOR[row.status as SubscriptionStatus] ?? 'bg-slate-400',
     })) ?? [];
 
-  const invoiceSlices: StatusSlice[] =
+  const invoiceSlices: BarSegment[] =
     stats?.invoices.byStatus.map((row) => ({
+      key: row.status,
       label: row.status,
-      count: row.count,
-      color: INVOICE_STATUS_COLOR[row.status] ?? 'bg-slate-400',
+      value: row.count,
+      color: INVOICE_STATUS_COLOR[row.status as InvoiceStatus] ?? 'bg-slate-400',
+    })) ?? [];
+
+  const productSlices: BarSegment[] =
+    stats?.catalogue.products.byType.map((row) => ({
+      key: row.type,
+      label: row.type,
+      value: row.count,
+      color: PRODUCT_TYPE_COLOR[row.type] ?? 'bg-slate-400',
     })) ?? [];
 
   const activeSubscriptions =
-    subscriptionSlices.find((slice) => slice.label === 'Active')?.count ?? 0;
+    subscriptionSlices.find((slice) => slice.label === 'Active')?.value ?? 0;
 
   return (
     <AppShell>
@@ -416,28 +341,24 @@ export function DashboardPage() {
                       </div>
                     </div>
 
-                    {money.mrrByInterval.length > 0 ? (
-                      <ul
-                        className="mt-4 space-y-2"
-                        aria-label="Recurring revenue by billing interval"
-                      >
-                        {money.mrrByInterval.map((slice) => (
-                          <BarRow
-                            key={slice.billingInterval}
-                            label={intervalLabel(slice.billingInterval)}
-                            value={slice.mrr}
-                            max={intervalMax}
-                            display={formatMoney(slice.mrr)}
-                            color="bg-plum-500"
-                          />
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="mt-4 text-xs text-slate-500">
-                        No active contract is billing yet — recurring revenue starts at the first
-                        activation.
-                      </p>
-                    )}
+                    <div className="mt-4">
+                      <BarList
+                        ariaLabel="Recurring revenue by billing interval"
+                        labelWidth="w-[4.5rem]"
+                        items={money.mrrByInterval.map((slice) => ({
+                          key: slice.billingInterval,
+                          label: intervalLabel(slice.billingInterval),
+                          value: slice.mrr,
+                          display: formatMoney(slice.mrr),
+                        }))}
+                        empty={
+                          <p className="text-xs text-slate-500">
+                            No active contract is billing yet — recurring revenue starts at the
+                            first activation.
+                          </p>
+                        }
+                      />
+                    </div>
 
                     <div className="mt-4 grid grid-cols-3 gap-3 border-t border-slate-100 pt-3">
                       <StatCell
@@ -530,10 +451,12 @@ export function DashboardPage() {
               >
                 {stats && money ? (
                   <>
-                    <StatusBar
-                      slices={invoiceSlices}
-                      empty="No invoice has been generated yet."
+                    <StackedBar
+                      ariaLabel="Invoices by status"
+                      segments={invoiceSlices}
+                      empty={<p className="text-xs text-slate-500">No invoice has been generated yet.</p>}
                     />
+                    <ChartLegend segments={invoiceSlices} className="mt-3" />
                     <div className="mt-4 grid grid-cols-3 gap-3 border-t border-slate-100 pt-3">
                       <StatCell
                         label="Outstanding"
@@ -579,10 +502,16 @@ export function DashboardPage() {
                       </p>
                     </div>
                     <div className="mt-3">
-                      <StatusBar
-                        slices={subscriptionSlices}
-                        empty="No contract has been created yet."
+                      <StackedBar
+                        ariaLabel="Subscriptions by status"
+                        segments={subscriptionSlices}
+                        empty={
+                          <p className="text-xs text-slate-500">
+                            No contract has been created yet.
+                          </p>
+                        }
                       />
+                      <ChartLegend segments={subscriptionSlices} className="mt-3" />
                     </div>
                   </>
                 ) : (
@@ -601,18 +530,14 @@ export function DashboardPage() {
                 {stats ? (
                   <>
                     <p className="text-xs text-slate-500">Products by type</p>
-                    <ul className="mt-2 space-y-2" aria-label="Products by type">
-                      {stats.catalogue.products.byType.map((row) => (
-                        <BarRow
-                          key={row.type}
-                          label={row.type}
-                          value={row.count}
-                          max={productMax}
-                          display={row.count.toLocaleString()}
-                          color={PRODUCT_TYPE_COLOR[row.type] ?? 'bg-slate-400'}
-                        />
-                      ))}
-                    </ul>
+                    <div className="mt-2">
+                      <StackedBar
+                        ariaLabel="Products by type"
+                        segments={productSlices}
+                        empty={<p className="text-xs text-slate-500">No products yet.</p>}
+                      />
+                    </div>
+                    <ChartLegend segments={productSlices} className="mt-3" />
                     <p className="mt-3 text-xs text-slate-500">
                       {stats.catalogue.products.active === stats.catalogue.products.total
                         ? `All ${stats.catalogue.products.total.toLocaleString()} products are active`
@@ -756,7 +681,7 @@ export function DashboardPage() {
                             <span
                               className={cx(
                                 'h-2 w-2 rounded-full',
-                                SUBSCRIPTION_STATUS_COLOR[item.status] ?? 'bg-slate-400',
+                                SUBSCRIPTION_STATUS_COLOR[item.status],
                               )}
                               aria-hidden="true"
                             />

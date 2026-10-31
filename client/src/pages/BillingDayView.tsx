@@ -2,6 +2,7 @@ import { CalendarCheck2, Play, ReceiptText } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/layout/AppShell';
+import { BarList } from '../components/charts/BarList';
 import { Alert } from '../components/ui/Alert';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -29,6 +30,15 @@ export function BillingDayView() {
   const [result, setResult] = useState<BillingRunResult | null>(null);
 
   const preview = data;
+
+  const nextRun = (data?.items ?? []).reduce(
+    (totals, item) => ({
+      subtotal: totals.subtotal + item.subtotal,
+      discount: totals.discount + item.discountAmount,
+      tax: totals.tax + item.taxAmount,
+    }),
+    { subtotal: 0, discount: 0, tax: 0 },
+  );
 
   const runBillingDay = async () => {
     setIsConfirmOpen(false);
@@ -215,6 +225,52 @@ export function BillingDayView() {
                 </dd>
               </div>
             </dl>
+
+            <section className="card px-4 py-3.5" aria-label="Anatomy of the next run">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-ink">Anatomy of the next run</h2>
+                  <p className="text-xs text-slate-500">
+                    What the queue adds up to before it becomes invoices
+                  </p>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Net{' '}
+                  <span className="font-semibold tabular-nums text-plum-700">
+                    {formatMoney(preview.dueTotal)}
+                  </span>
+                </p>
+              </div>
+              <div className="mt-3">
+                <BarList
+                  ariaLabel="Subtotal, discounts and tax in the next run"
+                  labelWidth="w-[5.5rem]"
+                  items={[
+                    {
+                      key: 'subtotal',
+                      label: 'Subtotal',
+                      value: nextRun.subtotal,
+                      display: formatMoney(nextRun.subtotal),
+                    },
+                    {
+                      key: 'discount',
+                      label: 'Discounts',
+                      value: nextRun.discount,
+                      display: `−${formatMoney(nextRun.discount)}`,
+                      color: 'bg-amber-500',
+                    },
+                    {
+                      key: 'tax',
+                      label: 'Tax',
+                      value: nextRun.tax,
+                      display: formatMoney(nextRun.tax),
+                      color: 'bg-teal-600',
+                    },
+                  ]}
+                  empty={<p className="text-xs text-slate-500">Nothing is queued to invoice.</p>}
+                />
+              </div>
+            </section>
 
             {preview.closingCount > 0 ? (
               <Alert tone="warning" title="These contracts close before they are billed">

@@ -2,6 +2,7 @@ import { ArrowRight, Play, ReceiptText, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/layout/AppShell';
+import { ChartLegend, StackedBar, type BarSegment } from '../components/charts/StackedBar';
 import { Alert } from '../components/ui/Alert';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -10,7 +11,7 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { SelectField } from '../components/ui/SelectField';
 import { cx } from '../lib/cx';
 import { formatDate, formatMoney } from '../lib/format';
-import { INVOICE_TONE } from '../lib/invoice-status';
+import { INVOICE_STATUS_COLOR, INVOICE_TONE } from '../lib/invoice-status';
 import type { Invoice, InvoiceStatus } from '../lib/types';
 import { useApiResource } from '../lib/use-api-resource';
 
@@ -43,17 +44,30 @@ export function InvoicesPage() {
     let outstandingCount = 0;
     let collected = 0;
     let overdue = 0;
+    let billed = 0;
 
     for (const invoice of invoices) {
       if (invoice.status === 'Cancelled') continue;
+      billed += invoice.totalAmount;
       outstanding += invoice.balanceDue;
       if (invoice.balanceDue > 0) outstandingCount += 1;
       collected += invoice.amountPaid;
       if (invoice.isOverdue) overdue += 1;
     }
 
-    return { outstanding, outstandingCount, collected, overdue };
+    return { outstanding, outstandingCount, collected, overdue, billed };
   }, [invoices]);
+
+  const bookSegments: BarSegment[] = useMemo(
+    () =>
+      STATUS_OPTIONS.map((status) => ({
+        key: status,
+        label: status,
+        value: invoices.filter((invoice) => invoice.status === status).length,
+        color: INVOICE_STATUS_COLOR[status],
+      })),
+    [invoices],
+  );
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -123,6 +137,32 @@ export function InvoicesPage() {
                 </dd>
               </div>
             </dl>
+
+            <section className="card px-4 py-3.5" aria-label="Invoice status mix">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-ink">Where the book stands</h2>
+                  <p className="text-xs text-slate-500">
+                    {invoices.length.toLocaleString()} invoice
+                    {invoices.length === 1 ? '' : 's'} on this page, by status
+                  </p>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Billed{' '}
+                  <span className="font-semibold tabular-nums text-ink">
+                    {formatMoney(totals.billed)}
+                  </span>
+                </p>
+              </div>
+              <div className="mt-3">
+                <StackedBar
+                  ariaLabel="Invoices by status"
+                  segments={bookSegments}
+                  empty={<p className="text-xs text-slate-500">No invoices yet.</p>}
+                />
+              </div>
+              <ChartLegend segments={bookSegments} className="mt-2.5" />
+            </section>
 
             <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Invoice view">
               {VIEW_OPTIONS.map((option) => {
@@ -229,9 +269,7 @@ export function InvoicesPage() {
                         <th scope="col" className="px-3 py-2.5 text-right">Total</th>
                         <th scope="col" className="px-3 py-2.5 text-right">Balance</th>
                         <th scope="col" className="px-3 py-2.5">Status</th>
-                        <th scope="col" className="px-5 py-2.5">
-                          <span className="sr-only">Open</span>
-                        </th>
+                        <th scope="col" className="px-5 py-2.5" aria-label="Open" />
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">

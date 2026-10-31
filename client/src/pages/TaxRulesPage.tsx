@@ -2,6 +2,7 @@ import { Archive, Pencil, Plus, Scale } from 'lucide-react';
 import { useState } from 'react';
 import { TaxRuleFormModal } from '../components/billing/TaxRuleFormModal';
 import { AppShell } from '../components/layout/AppShell';
+import { BarList } from '../components/charts/BarList';
 import { Alert } from '../components/ui/Alert';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -32,6 +33,7 @@ export function TaxRulesPage() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const rules = data ?? [];
+  const defaultRate = rules.find((rule) => rule.isDefault)?.rate ?? null;
 
   const applySaved = (saved: TaxRule) => {
     const exists = rules.some((rule) => rule.id === saved.id);
@@ -109,76 +111,112 @@ export function TaxRulesPage() {
             }
           />
         ) : (
-          <div className="card overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50/60 text-left text-xs font-semibold text-slate-500">
-                    <th scope="col" className="px-5 py-2.5">Rate</th>
-                    <th scope="col" className="px-3 py-2.5">Status</th>
-                    <th scope="col" className="px-3 py-2.5">Applied when</th>
-                    <th scope="col" className="px-3 py-2.5">Created</th>
-                    {isAdmin ? (
-                      <th scope="col" className="px-5 py-2.5 text-right">Actions</th>
-                    ) : null}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {rules.map((rule) => (
-                    <tr key={rule.id} className="hover:bg-slate-50/70">
-                      <td className="px-5 py-3">
-                        <p className="font-semibold text-ink">{rule.name}</p>
-                        <p className="text-xs text-slate-500">{rule.rate}% of the taxable amount</p>
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <Badge tone={rule.isActive ? 'emerald' : 'neutral'}>
-                            {rule.isActive ? 'Active' : 'Retired'}
-                          </Badge>
-                          {rule.isDefault ? <Badge tone="plum">Default</Badge> : null}
-                        </div>
-                      </td>
-                      <td className="px-3 py-3 text-slate-600">
-                        {rule.isDefault
-                          ? 'Every contract without its own rate'
-                          : 'Only contracts assigned this rate'}
-                      </td>
-                      <td className="px-3 py-3 text-slate-600">
-                        {formatDateTime(rule.createdAt)}
-                      </td>
+          <>
+            <section className="card px-4 py-3.5" aria-label="Tax rates at a glance">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-ink">Rates at a glance</h2>
+                  <p className="text-xs text-slate-500">
+                    Every rate on one scale, so the spread is readable before the table is
+                  </p>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Default{' '}
+                  <span className="font-semibold tabular-nums text-ink">
+                    {defaultRate === null ? 'not set' : `${defaultRate}%`}
+                  </span>
+                </p>
+              </div>
+              <div className="mt-3">
+                <BarList
+                  ariaLabel="Tax rates by rule"
+                  labelWidth="w-[9rem]"
+                  items={rules.map((rule) => ({
+                    key: String(rule.id),
+                    label: rule.name,
+                    value: rule.rate,
+                    display: `${rule.rate}%`,
+                    color: rule.isDefault
+                      ? 'bg-plum-600'
+                      : rule.isActive
+                        ? 'bg-teal-600'
+                        : 'bg-slate-300',
+                  }))}
+                />
+              </div>
+            </section>
+
+            <div className="card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50/60 text-left text-xs font-semibold text-slate-500">
+                      <th scope="col" className="px-5 py-2.5">Rate</th>
+                      <th scope="col" className="px-3 py-2.5">Status</th>
+                      <th scope="col" className="px-3 py-2.5">Applied when</th>
+                      <th scope="col" className="px-3 py-2.5">Created</th>
                       {isAdmin ? (
+                        <th scope="col" className="px-5 py-2.5 text-right">Actions</th>
+                      ) : null}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {rules.map((rule) => (
+                      <tr key={rule.id} className="hover:bg-slate-50/70">
                         <td className="px-5 py-3">
-                          <div className="flex items-center justify-end gap-2">
-                            <Button
-                              variant="secondary"
-                              className="w-auto px-3 py-1.5 text-xs"
-                              onClick={() => setFormState({ open: true, rule })}
-                              disabled={busyId === rule.id}
-                            >
-                              <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-                              Edit
-                            </Button>
-                            {rule.isActive ? (
+                          <p className="font-semibold text-ink">{rule.name}</p>
+                          <p className="text-xs text-slate-500">{rule.rate}% of the taxable amount</p>
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Badge tone={rule.isActive ? 'emerald' : 'neutral'}>
+                              {rule.isActive ? 'Active' : 'Retired'}
+                            </Badge>
+                            {rule.isDefault ? <Badge tone="plum">Default</Badge> : null}
+                          </div>
+                        </td>
+                        <td className="px-3 py-3 text-slate-600">
+                          {rule.isDefault
+                            ? 'Every contract without its own rate'
+                            : 'Only contracts assigned this rate'}
+                        </td>
+                        <td className="px-3 py-3 text-slate-600">
+                          {formatDateTime(rule.createdAt)}
+                        </td>
+                        {isAdmin ? (
+                          <td className="px-5 py-3">
+                            <div className="flex items-center justify-end gap-2">
                               <Button
                                 variant="secondary"
                                 className="w-auto px-3 py-1.5 text-xs"
-                                onClick={() => retireRule(rule)}
+                                onClick={() => setFormState({ open: true, rule })}
                                 disabled={busyId === rule.id}
-                                isLoading={busyId === rule.id}
                               >
-                                <Archive className="h-3.5 w-3.5" aria-hidden="true" />
-                                Retire
+                                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                                Edit
                               </Button>
-                            ) : null}
-                          </div>
-                        </td>
-                      ) : null}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                              {rule.isActive ? (
+                                <Button
+                                  variant="secondary"
+                                  className="w-auto px-3 py-1.5 text-xs"
+                                  onClick={() => retireRule(rule)}
+                                  disabled={busyId === rule.id}
+                                  isLoading={busyId === rule.id}
+                                >
+                                  <Archive className="h-3.5 w-3.5" aria-hidden="true" />
+                                  Retire
+                                </Button>
+                              ) : null}
+                            </div>
+                          </td>
+                        ) : null}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
             </div>
           </div>
+          </>
         )}
 
         <p className="text-xs leading-relaxed text-slate-500">

@@ -2,6 +2,8 @@ import { ArrowRight, FileStack, Plus, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/layout/AppShell';
+import { BarList } from '../components/charts/BarList';
+import { ChartLegend, StackedBar, type BarSegment } from '../components/charts/StackedBar';
 import { NewSubscriptionModal } from '../components/subscriptions/NewSubscriptionModal';
 import { Alert } from '../components/ui/Alert';
 import { Badge } from '../components/ui/Badge';
@@ -10,7 +12,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SelectField } from '../components/ui/SelectField';
 import { formatDate, formatMoney, intervalLabel } from '../lib/format';
-import { STATUS_TONE } from '../lib/subscription-status';
+import { STATUS_TONE, SUBSCRIPTION_STATUS_COLOR } from '../lib/subscription-status';
 import type { Subscription, SubscriptionStatus } from '../lib/types';
 import { useApiResource } from '../lib/use-api-resource';
 
@@ -48,6 +50,28 @@ export function SubscriptionsPage() {
     };
     for (const subscription of subscriptions) tally[subscription.status] += 1;
     return tally;
+  }, [subscriptions]);
+
+  const statusSegments: BarSegment[] = STATUS_OPTIONS.map((status) => ({
+    key: status,
+    label: status,
+    value: counts[status],
+    color: SUBSCRIPTION_STATUS_COLOR[status],
+  }));
+
+  const planValues = useMemo(() => {
+    const byPlan = new Map<string, number>();
+    for (const subscription of subscriptions) {
+      byPlan.set(subscription.planName, (byPlan.get(subscription.planName) ?? 0) + subscription.total);
+    }
+    return [...byPlan.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .map(([name, value]) => ({
+        key: name,
+        label: name,
+        value,
+        display: formatMoney(value),
+      }));
   }, [subscriptions]);
 
   const visible = useMemo(() => {
@@ -115,6 +139,39 @@ export function SubscriptionsPage() {
                 </div>
               ))}
             </dl>
+
+            <section className="grid gap-4 lg:grid-cols-2" aria-label="Lifecycle mix">
+              <article className="card px-4 py-3.5">
+                <h2 className="text-sm font-semibold text-ink">Lifecycle mix</h2>
+                <p className="text-xs text-slate-500">
+                  {subscriptions.length.toLocaleString()} contract
+                  {subscriptions.length === 1 ? '' : 's'} by status
+                </p>
+                <div className="mt-3">
+                  <StackedBar
+                    ariaLabel="Contracts by status"
+                    segments={statusSegments}
+                    empty={<p className="text-xs text-slate-500">No contracts yet.</p>}
+                  />
+                </div>
+                <ChartLegend segments={statusSegments} className="mt-2.5" />
+              </article>
+
+              <article className="card px-4 py-3.5">
+                <h2 className="text-sm font-semibold text-ink">Value by plan</h2>
+                <p className="text-xs text-slate-500">
+                  What each plan is billing per cycle, at the quantities on these contracts
+                </p>
+                <div className="mt-3">
+                  <BarList
+                    ariaLabel="Contract value by plan"
+                    labelWidth="w-[6.5rem]"
+                    items={planValues}
+                    empty={<p className="text-xs text-slate-500">No contract value to show yet.</p>}
+                  />
+                </div>
+              </article>
+            </section>
 
             <div className="card overflow-hidden">
               <div className="flex flex-wrap items-end gap-3 border-b border-slate-200 bg-slate-50/60 px-5 py-4">
@@ -184,9 +241,7 @@ export function SubscriptionsPage() {
                         <th scope="col" className="px-3 py-2.5">Next billing</th>
                         <th scope="col" className="px-3 py-2.5 text-right">Value</th>
                         <th scope="col" className="px-3 py-2.5">Status</th>
-                        <th scope="col" className="px-5 py-2.5">
-                          <span className="sr-only">Open</span>
-                        </th>
+                        <th scope="col" className="px-5 py-2.5" aria-label="Open" />
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">

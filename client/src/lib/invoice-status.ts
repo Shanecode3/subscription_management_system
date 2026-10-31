@@ -18,6 +18,17 @@ export const INVOICE_ACTION_LABEL: Record<InvoiceAction, string> = {
 };
 
 /**
+ * The same states as fills, for stacked bars and their legends. A status has
+ * one colour across the badge, the table and every chart it appears in.
+ */
+export const INVOICE_STATUS_COLOR: Record<InvoiceStatus, string> = {
+  Draft: 'bg-slate-400',
+  Confirmed: 'bg-amber-500',
+  Paid: 'bg-emerald-500',
+  Cancelled: 'bg-rose-400',
+};
+
+/**
  * A discount's standing is derived server-side from its window, usage count and
  * active flag, so the label here is never a second opinion on the rules.
  */

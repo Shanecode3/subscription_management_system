@@ -2,6 +2,7 @@ import { Archive, CalendarClock, Check, Pencil, Plus, RotateCcw } from 'lucide-r
 import { useState } from 'react';
 import { PlanFormModal } from '../components/catalog/PlanFormModal';
 import { AppShell } from '../components/layout/AppShell';
+import { BarList } from '../components/charts/BarList';
 import { Alert } from '../components/ui/Alert';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -230,127 +231,165 @@ export function PlansPage() {
             }
           />
         ) : (
-          <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-            {plans.map((plan) => (
-              <article
-                key={plan.id}
-                className="relative overflow-hidden rounded-xl border border-slate-200 bg-white"
-              >
-                <span
-                  className={cx(
-                    'absolute inset-y-0 left-0 w-1.5',
-                    INTERVAL_ACCENT[plan.billingInterval],
-                    !plan.isActive && 'opacity-30',
-                  )}
-                  aria-hidden="true"
-                />
-
-                <div className="flex h-full flex-col p-5 pl-6">
-                  <div className="flex items-start justify-between gap-3">
-                    <h2
-                      className={cx(
-                        'text-base font-semibold leading-tight',
-                        plan.isActive ? 'text-ink' : 'text-slate-500',
-                      )}
-                    >
-                      {plan.name}
-                    </h2>
-                    <Badge tone={plan.isActive ? 'emerald' : 'neutral'}>
-                      {plan.isActive ? 'Active' : 'Retired'}
-                    </Badge>
-                  </div>
-
-                  <p className="mt-4 flex items-baseline gap-1.5">
-                    <span className="text-2xl font-semibold tabular-nums tracking-tight text-ink">
-                      {formatMoney(plan.price)}
-                    </span>
-                    <span className="text-sm text-slate-500">
-                      / {billingSuffix(plan.billingInterval)}
-                    </span>
+          <>
+            <section className="card px-4 py-3.5" aria-label="Monthly cost comparison">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-ink">Cost per month</h2>
+                  <p className="text-xs text-slate-500">
+                    Each plan normalised to a month at its own minimum quantity, so a yearly plan
+                    and a weekly one are finally comparable
                   </p>
-
-                  <div className="mt-4 rounded-lg bg-slate-50 px-3 py-3">
-                    <p className="text-xs font-semibold text-slate-700">What this plan includes</p>
-                    <ul className="mt-2 space-y-1.5">
-                      {planOffers(plan).map((offer) => (
-                        <li
-                          key={offer}
-                          className="flex gap-2 text-xs leading-snug text-slate-600"
-                        >
-                          <Check
-                            className="mt-0.5 h-3.5 w-3.5 shrink-0 text-teal-600"
-                            aria-hidden="true"
-                          />
-                          <span>{offer}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  {/*
-                    The switch panel is an editing surface, so only admins get it.
-                    Everyone else reads the same rules in the plain-language list
-                    above, which is why the rows are not repeated as static badges.
-                  */}
-                  {isAdmin ? (
-                    <div className="mt-4 divide-y divide-slate-100 border-t border-slate-100">
-                      <p className="pt-3 text-xs font-semibold text-slate-700">Lifecycle rules</p>
-                      {PLAN_FLAGS.map((flag) => (
-                        <div key={flag.key} className="flex items-center justify-between gap-3 py-2.5">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-ink">{flag.label}</p>
-                            <p className="text-xs leading-snug text-slate-500">{flag.description}</p>
-                          </div>
-                          <Switch
-                            label={`${flag.label} for ${plan.name}`}
-                            checked={plan[flag.key]}
-                            isBusy={pendingFlag?.planId === plan.id && pendingFlag.key === flag.key}
-                            onChange={(next) => toggleFlag(plan, flag.key, next)}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  {isAdmin ? (
-                    <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-4">
-                      <Button
-                        variant="secondary"
-                        className="w-auto px-3 py-2 text-xs"
-                        onClick={() => setFormState({ open: true, plan })}
-                        disabled={busyId === plan.id}
-                      >
-                        <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-                        Edit
-                      </Button>
-
-                      {plan.isActive ? (
-                        <Button
-                          variant="secondary"
-                          className="w-auto px-3 py-2 text-xs"
-                          onClick={() => retirePlan(plan)}
-                          disabled={busyId === plan.id}
-                        >
-                          <Archive className="h-3.5 w-3.5" aria-hidden="true" />
-                          Retire
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="secondary"
-                          className="w-auto px-3 py-2 text-xs"
-                          onClick={() => restorePlan(plan)}
-                          disabled={busyId === plan.id}
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-                          Restore
-                        </Button>
-                      )}
-                    </div>
-                  ) : null}
                 </div>
-              </article>
-            ))}
-          </div>
+                <p className="text-xs text-slate-500">
+                  {plans.length.toLocaleString()} plan{plans.length === 1 ? '' : 's'}
+                </p>
+              </div>
+              <div className="mt-3">
+                <BarList
+                  ariaLabel="Monthly cost by plan"
+                  labelWidth="w-[8.5rem]"
+                  items={plans
+                    .map((plan) => ({
+                      key: String(plan.id),
+                      label: plan.name,
+                      value:
+                        (plan.price * INTERVALS_PER_YEAR[plan.billingInterval] * plan.minQuantity) /
+                        12,
+                      color: INTERVAL_ACCENT[plan.billingInterval],
+                    }))
+                    // Ranked by the value the bar draws, so the list reads top to bottom.
+                    .sort((left, right) => right.value - left.value)
+                    .map((item) => ({
+                      ...item,
+                      display: formatMoney(item.value),
+                    }))}
+                />
+              </div>
+            </section>
+
+            <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              {plans.map((plan) => (
+                <article
+                  key={plan.id}
+                  className="relative overflow-hidden rounded-xl border border-slate-200 bg-white"
+                >
+                  <span
+                    className={cx(
+                      'absolute inset-y-0 left-0 w-1.5',
+                      INTERVAL_ACCENT[plan.billingInterval],
+                      !plan.isActive && 'opacity-30',
+                    )}
+                    aria-hidden="true"
+                  />
+
+                  <div className="flex h-full flex-col p-5 pl-6">
+                    <div className="flex items-start justify-between gap-3">
+                      <h2
+                        className={cx(
+                          'text-base font-semibold leading-tight',
+                          plan.isActive ? 'text-ink' : 'text-slate-500',
+                        )}
+                      >
+                        {plan.name}
+                      </h2>
+                      <Badge tone={plan.isActive ? 'emerald' : 'neutral'}>
+                        {plan.isActive ? 'Active' : 'Retired'}
+                      </Badge>
+                    </div>
+
+                    <p className="mt-4 flex items-baseline gap-1.5">
+                      <span className="text-2xl font-semibold tabular-nums tracking-tight text-ink">
+                        {formatMoney(plan.price)}
+                      </span>
+                      <span className="text-sm text-slate-500">
+                        / {billingSuffix(plan.billingInterval)}
+                      </span>
+                    </p>
+
+                    <div className="mt-4 rounded-lg bg-slate-50 px-3 py-3">
+                      <p className="text-xs font-semibold text-slate-700">What this plan includes</p>
+                      <ul className="mt-2 space-y-1.5">
+                        {planOffers(plan).map((offer) => (
+                          <li
+                            key={offer}
+                            className="flex gap-2 text-xs leading-snug text-slate-600"
+                          >
+                            <Check
+                              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-teal-600"
+                              aria-hidden="true"
+                            />
+                            <span>{offer}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {/*
+                      The switch panel is an editing surface, so only admins get it.
+                      Everyone else reads the same rules in the plain-language list
+                      above, which is why the rows are not repeated as static badges.
+                    */}
+                    {isAdmin ? (
+                      <div className="mt-4 divide-y divide-slate-100 border-t border-slate-100">
+                        <p className="pt-3 text-xs font-semibold text-slate-700">Lifecycle rules</p>
+                        {PLAN_FLAGS.map((flag) => (
+                          <div key={flag.key} className="flex items-center justify-between gap-3 py-2.5">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-ink">{flag.label}</p>
+                              <p className="text-xs leading-snug text-slate-500">{flag.description}</p>
+                            </div>
+                            <Switch
+                              label={`${flag.label} for ${plan.name}`}
+                              checked={plan[flag.key]}
+                              isBusy={pendingFlag?.planId === plan.id && pendingFlag.key === flag.key}
+                              onChange={(next) => toggleFlag(plan, flag.key, next)}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {isAdmin ? (
+                      <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-4">
+                        <Button
+                          variant="secondary"
+                          className="w-auto px-3 py-2 text-xs"
+                          onClick={() => setFormState({ open: true, plan })}
+                          disabled={busyId === plan.id}
+                        >
+                          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                          Edit
+                        </Button>
+
+                        {plan.isActive ? (
+                          <Button
+                            variant="secondary"
+                            className="w-auto px-3 py-2 text-xs"
+                            onClick={() => retirePlan(plan)}
+                            disabled={busyId === plan.id}
+                          >
+                            <Archive className="h-3.5 w-3.5" aria-hidden="true" />
+                            Retire
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="secondary"
+                            className="w-auto px-3 py-2 text-xs"
+                            onClick={() => restorePlan(plan)}
+                            disabled={busyId === plan.id}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                            Restore
+                          </Button>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </>
         )}
       </div>
 

@@ -24,8 +24,17 @@ export const STATUS_TONE: Record<SubscriptionStatus, StatusTone> = {
   Closed: 'rose',
 };
 
-/** The happy path shown in the progress bar. Paused branches off Active. */
-export const MAIN_FLOW: readonly SubscriptionStatus[] = [
+/** The same states as fills, for stacked bars and their legends. */
+export const SUBSCRIPTION_STATUS_COLOR: Record<SubscriptionStatus, string> = {
+  Draft: 'bg-slate-400',
+  Quotation: 'bg-plum-400',
+  Confirmed: 'bg-teal-500',
+  Active: 'bg-emerald-500',
+  Paused: 'bg-amber-500',
+  Closed: 'bg-rose-400',
+};
+
+/** The happy path shown in the progress bar. Paused branches off Active. */export const MAIN_FLOW: readonly SubscriptionStatus[] = [
   'Draft',
   'Quotation',
   'Confirmed',
